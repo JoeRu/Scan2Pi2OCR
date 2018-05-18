@@ -82,7 +82,7 @@ for i in scan_*.pnm.tif; do
     tesseract "$i" "$i" -l $LANGUAGE hocr
     hocr2pdf -i "$i" -s -o "$i.pdf" < "$i.hocr"
 # using abby-cloud
-#    python /MYZFS/Personal/joe/process.py -l German -pdf "${i}" "${i}".pdf 
+#    python <path-to->/process.py -l German -pdf "${i}" "${i}".pdf 
 done
 
 # create PDF
