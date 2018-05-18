@@ -1,17 +1,15 @@
 #!/bin/bash
+# https://github.com/JoeRu/Scan2Pi2OCR
+# Licensed under GPLv3 // Author: Johannes Rumpf - https://web-dreamer.de
+# twitter: @jay_ar
+# 
 # Thanks to Andreas Gohr (http://www.splitbrain.org/) for the initial work
 # https://github.com/splitbrain/paper-backup/
 exec 1> >(logger -s -t $(basename $0)) 2>&1
 #https://urbanautomaton.com/blog/2014/09/09/redirecting-bash-script-output-to-syslog/
 
-OUT_DIR=<your-output-dir>
-WATCH_SCANS="<dir-to->/watch_scans"
-TMP_DIR="$WATCH_SCANS/$1"
-FILE_NAME=scan_`date +%Y%m%d-%H%M%S`
-LANGUAGE="deu" # only for tesseract - for abby you need to adapt the line below
-
-export ABBYY_APPID=<your-app-id>
-export ABBYY_PWD=<your-app-passwd>
+#reading config
+source ./scan2ocr.config.sh
 
 #echo $TMP_DIR
 echo "Start to OCR"
@@ -35,7 +33,7 @@ for i in scan_*.pnm; do
     if [[ -z "$black" ]]; then
         black=0
     fi
-
+# black below 0.05 Percent of Pixels allover --> than blank
     blank=$(echo "scale=4; ${black}/${white} < 0.005" | bc)
     #echo $white $black $blank
     if [ "${blank}" -eq "1" ]; then
@@ -46,10 +44,11 @@ done
 
 
 # cut borders 
-echo 'cutting borders...'
-for i in scan_*.pnm; do
-    mogrify -shave 50x5 "${i}"
-done
+#echo 'cutting borders...'
+#for i in scan_*.pnm; do
+#    mogrify -shave 50x5 "${i}"
+#done
+# don't needed with ScanSnap.. just for not-document-scanners inside
 
 # apply Contrast-Cleaning
 echo 'cleaning pages...'
@@ -67,7 +66,7 @@ done
 #    rm -f "$f"
 #done
 
-# apply text cleaning and convert to tif
+# convert to tif and compress a little with lzw
 echo 'cleaning pages...'
 for i in scan_*.pnm; do
     echo "${i}"
@@ -79,11 +78,19 @@ echo 'doing OCR...'
 for i in scan_*.pnm.tif; do
     echo "${i}"
 # using tesseract
-    tesseract "$i" "$i" -l $LANGUAGE hocr
-    hocr2pdf -i "$i" -s -o "$i.pdf" < "$i.hocr"
+#    tesseract "$i" "$i" -l $LANGUAGE hocr
+#    hocr2pdf -i "$i" -s -o "$i.pdf" < "$i.hocr"
+
 # using abby-cloud
-#    python <path-to->/process.py -l German -pdf "${i}" "${i}".pdf 
+# https://ocrsdk.com/documentation/quick-start-guide/python-ocr-sdk/
+    python $PATH_TO_ABBY_PROCESS_PY/process.py -l German -pdf "${i}" "${i}".pdf 
 done
+
+# tesseract 4 - if run from container you need to run as root and mount the directorys accordingly to the container.
+# ls > scan_list.txt
+# @todo adapt path in container and run:
+# docker exec -it t4re /bin/bash -c "cd ./test.ocr/; tesseract scan_list.txt test --psm 1 --oem 2 txt pdf hocr"
+# adapt moving of result
 
 # create PDF
 echo 'creating PDF...'
@@ -91,12 +98,18 @@ pdftk *.tif.pdf cat output "$FILE_NAME.pdf"
 cp $FILE_NAME.pdf $OUT_DIR/
 
 cd $WATCH_SCANS
-# save steps
-mkdir $OUT_DIR/$FILE_NAME
-mv $1 $OUT_DIR/$FILE_NAME/
 
+# save or trash work of files - for debug and process purposes
+if [$TRASH_TMP_FILES -eq 1 ]
+then
 # delete steps
-#rm -Rf $1
+   rm -Rf $1
+else
+# save steps
+   mkdir $OUT_DIR/$FILE_NAME
+   mv $1 $OUT_DIR/$FILE_NAME/
+fi
 
 #done - next
 echo "OCR-Script is done"
+
