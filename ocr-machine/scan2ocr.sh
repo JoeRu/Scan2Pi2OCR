@@ -76,32 +76,31 @@ done
 # do OCR
 echo 'doing OCR...'
 for i in scan_*.pnm.tif; do
-    echo "${i}"
+    echo "${i}" >> scan_list.txt
 # using tesseract
 #    tesseract "$i" "$i" -l $LANGUAGE hocr
 #    hocr2pdf -i "$i" -s -o "$i.pdf" < "$i.hocr"
 
 # using abby-cloud
 # https://ocrsdk.com/documentation/quick-start-guide/python-ocr-sdk/
-    python $PATH_TO_ABBY_PROCESS_PY/process.py -l German -pdf "${i}" "${i}".pdf 
+#    python $PATH_TO_ABBY_PROCESS_PY/process.py -l German -pdf "${i}" "${i}".pdf 
 done
 
 # tesseract 4 - if run from container you need to run as root and mount the directorys accordingly to the container.
 # ls > scan_list.txt
 # @todo adapt path in container and run:
-# docker exec -it t4re /bin/bash -c "cd ./test.ocr/; tesseract scan_list.txt test --psm 1 --oem 2 txt pdf hocr"
+ docker exec -it t4re /bin/bash -c "cd ./$1/; tesseract scan_list.txt $FILE_NAME --psm 1 --oem 2 txt pdf hocr"
 # adapt moving of result
 
 # create PDF
 echo 'creating PDF...'
-pdftk *.tif.pdf cat output "$FILE_NAME.pdf"
+#pdftk *.tif.pdf cat output "$FILE_NAME.pdf"
 cp $FILE_NAME.pdf $OUT_DIR/
 
 cd $WATCH_SCANS
 
 # save or trash work of files - for debug and process purposes
-if [$TRASH_TMP_FILES -eq 1 ]
-then
+if [ $TRASH_TMP_FILES -eq 1 ] then
 # delete steps
    rm -Rf $1
 else
