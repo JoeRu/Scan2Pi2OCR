@@ -1,0 +1,18 @@
+#!/bin/sh
+
+LOCKFILE="/tmp/insaned-scan.lock"
+INSANED_LOGFILE="/tmp/insaned.log"
+
+if [ -f "$LOCKFILE" ]; then
+    echo "Error: Another scanning operation is currently in progress" >> "$INSANED_LOGFILE"
+    exit 0
+fi
+# cleanup on exit
+finish() {
+    rm -f "$LOCKFILE" >/dev/null 2>&1
+}
+trap finish EXIT
+touch "$LOCKFILE"
+
+#su someuser -c " -- not working - adapt path to your-->
+/home/joe/scan.sh

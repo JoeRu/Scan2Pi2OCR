@@ -107,12 +107,12 @@ cp $WATCH_SCANS/$1/$FILE_NAME.pdf $OUT_DIR/
 if [ $TRASH_TMP_FILES -eq 1 ];
    then
 # delete steps
-#      rm -Rf $1
+      rm -Rf $1
      echo $1
    else
 # save steps
-#     mkdir $OUT_DIR/$FILE_NAME
-#     mv $1 $OUT_DIR/$FILE_NAME/
+     mkdir $OUT_DIR/$FILE_NAME
+     mv $1 $OUT_DIR/$FILE_NAME/
      echo "move done"
    fi
 
