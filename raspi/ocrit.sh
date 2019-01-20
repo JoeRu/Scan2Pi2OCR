@@ -13,9 +13,11 @@ echo $(id)
 /usr/bin/rsync -avz -e "ssh" "$TMP_DIR/" joe@joesnas:"/MYZFS/Personal/joe/watch_scans/$BASE/"
 ls -la $OUT_DIR/$BASE
 #cp $TMP_DIR/* .
-#echo "/MYZFS/Personal/joe/scan2ocr.sh $BASE" 
-ssh joe@joesnas "/MYZFS/Personal/joe/scan2ocr.sh $BASE"
-#echo $TMP_DIR
-#rm -rf $TMP_DIR
+echo "/MYZFS/Personal/joe/scan2ocr.sh $BASE" 
+#-t for pseudy tty - sudo docker problem
+ssh joe@joesnas -t "/MYZFS/Personal/joe/scan2ocr.sh $BASE"
+echo "ssh fertig.."
+echo $TMP_DIR
+rm -rf $TMP_DIR
 #exit
 echo "OCR done"

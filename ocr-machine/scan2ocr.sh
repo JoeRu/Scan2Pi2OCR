@@ -73,6 +73,7 @@ for i in scan_*.pnm; do
     convert "${i}" -compress lzw "${i}.tif"
 done
 
+rm scan_list.txt
 # do OCR
 echo 'doing OCR...'
 for i in scan_*.pnm.tif; do
@@ -89,25 +90,31 @@ done
 # tesseract 4 - if run from container you need to run as root and mount the directorys accordingly to the container.
 # ls > scan_list.txt
 # @todo adapt path in container and run:
- docker exec -it t4re /bin/bash -c "cd ./$1/; tesseract scan_list.txt $FILE_NAME --psm 1 --oem 2 txt pdf hocr"
+ sudo docker exec -t t4re /bin/bash -c "cd ./$1/; tesseract scan_list.txt $FILE_NAME -l deu --psm 1 --oem 2 txt pdf hocr"
+cp $FILE_NAME.pdf $OUT_DIR/
+cd $WATCH_SCANS
+sudo chown -R joe:joe $WATCH_SCANS
 # adapt moving of result
-
+ 
 # create PDF
 echo 'creating PDF...'
 #pdftk *.tif.pdf cat output "$FILE_NAME.pdf"
-cp $FILE_NAME.pdf $OUT_DIR/
+cp $WATCH_SCANS/$1/$FILE_NAME.pdf $OUT_DIR/
 
-cd $WATCH_SCANS
+#cd $WATCH_SCANS
 
 # save or trash work of files - for debug and process purposes
-if [ $TRASH_TMP_FILES -eq 1 ] then
+if [ $TRASH_TMP_FILES -eq 1 ];
+   then
 # delete steps
-   rm -Rf $1
-else
+#      rm -Rf $1
+     echo $1
+   else
 # save steps
-   mkdir $OUT_DIR/$FILE_NAME
-   mv $1 $OUT_DIR/$FILE_NAME/
-fi
+#     mkdir $OUT_DIR/$FILE_NAME
+#     mv $1 $OUT_DIR/$FILE_NAME/
+     echo "move done"
+   fi
 
 #done - next
 echo "OCR-Script is done"
