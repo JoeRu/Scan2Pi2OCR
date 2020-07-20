@@ -70,7 +70,7 @@ done
 echo 'cleaning pages...'
 for i in scan_*.pnm; do
     echo "${i}"
-    convert "${i}" -compress lzw "${i}.tif"
+    convert "${i}" -compress jpeg "${i}.tif"
 done
 
 rm scan_list.txt
@@ -78,10 +78,6 @@ rm scan_list.txt
 echo 'doing OCR...'
 for i in scan_*.pnm.tif; do
     echo "${i}" >> scan_list.txt
-# using tesseract
-#    tesseract "$i" "$i" -l $LANGUAGE hocr
-#    hocr2pdf -i "$i" -s -o "$i.pdf" < "$i.hocr"
-
 # using abby-cloud
 # https://ocrsdk.com/documentation/quick-start-guide/python-ocr-sdk/
 #    python $PATH_TO_ABBY_PROCESS_PY/process.py -l German -pdf "${i}" "${i}".pdf 
@@ -90,16 +86,37 @@ done
 # tesseract 4 - if run from container you need to run as root and mount the directorys accordingly to the container.
 # ls > scan_list.txt
 # @todo adapt path in container and run:
- sudo docker exec -t t4re /bin/bash -c "cd ./$1/; tesseract scan_list.txt $FILE_NAME -l deu --psm 1 --oem 2 txt pdf hocr"
+# sudo docker exec -t t4re /bin/bash -c "cd ./$1/; tesseract scan_list.txt $FILE_NAME -l deu --psm 1 --oem 2 txt pdf hocr"
+
+tesseract scan_list.txt $FILE_NAME -l deu+eng+frk --psm 1 --oem 2 txt pdf hocr
+
 cp $FILE_NAME.pdf $OUT_DIR/
 cd $WATCH_SCANS
-sudo chown -R joe:joe $WATCH_SCANS
+sudo chown -R $USER:$USER $WATCH_SCANS
 # adapt moving of result
  
 # create PDF
 echo 'creating PDF...'
 #pdftk *.tif.pdf cat output "$FILE_NAME.pdf"
 cp $WATCH_SCANS/$1/$FILE_NAME.pdf $OUT_DIR/
+exp_file="$OUT_DIR/$FILE_NAME.pdf"
+
+# uncomment if you use rclone and adapt. -- Espacialy the email-adress.
+#rclone copy $exp_file OneDrive_Joe:2020/
+#onedrive_link=$(rclone link OneDrive_Joe:2020/$FILE_NAME.pdf)
+head_file=$( head -n 50 $WATCH_SCANS/$1/$FILE_NAME.txt )
+mail_text="
+Please find the file attached
+ Original Path is
+$exp_file
+OneDrive_link
+$onedrive_link
+
+
+-----------------Content------------
+$head_file
+"
+echo $mail_text | mutt -s "$exp_file - ScanPi Mail" myemail@myemailprovider.com -a $exp_file
 
 #cd $WATCH_SCANS
 
@@ -107,7 +124,7 @@ cp $WATCH_SCANS/$1/$FILE_NAME.pdf $OUT_DIR/
 if [ $TRASH_TMP_FILES -eq 1 ];
    then
 # delete steps
-      rm -Rf $1
+     rm -Rf $1
      echo $1
    else
 # save steps

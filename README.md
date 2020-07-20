@@ -20,4 +20,7 @@ With this version - supported is the use of tesseract and abby-cloud.
 Abby has really good ocr-capabilities (but payed and with price-politics only good for big count of pages recognition) - still better (at least in German) than tesseract; but [tesseract4](https://github.com/tesseract-ocr/tesseract) with LTSM and (_important_) use of the -l language parameter is really good as well.
 
 The last changes reflect the switch to use docker with tesseract 4. Base of this docker image is [tesseract-ocr-re](https://github.com/tesseract-shadow/tesseract-ocr-re) some changes are in the docker directory. 
+--
+Added some lines to use [rclone](https://rclone.org/) to push the files to a cloud-Provider and create a link.
+Afterwards the link is added to an Email including the scaned File.
 

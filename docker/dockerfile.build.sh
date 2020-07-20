@@ -1,3 +1,3 @@
 #!/bin/bash
-docker build -t tesseractshadow/tesseract4ocrit ./
+docker build --no-cache -t tesseractshadow/tesseract4ocrit ./
 docker images
