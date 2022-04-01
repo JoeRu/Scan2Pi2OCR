@@ -24,3 +24,11 @@ The last changes reflect the switch to use docker with tesseract 4. Base of this
 Added some lines to use [rclone](https://rclone.org/) to push the files to a cloud-Provider and create a link.
 Afterwards the link is added to an Email including the scaned File.
 
+## Installation on Raspi
+
+Prepare your raspberry; tbd
+```
+ sudo apt install sane
+ 
+ git clone https://github.com/abusenius/insaned.git
+ ```
