@@ -28,7 +28,13 @@ Afterwards the link is added to an Email including the scaned File.
 
 Prepare your raspberry; tbd
 ```
- sudo apt install sane
- 
+ sudo apt install sane libsane libsane-dev
  git clone https://github.com/abusenius/insaned.git
+ cd insaned
+ make
+ sudo cp ./insaned /usr/bin
+ sudo mkdir /etc/insaned
+ sudo mkdir /etc/insaned/events
+ sudo cp events/* /etc/insaned/events/
+ 
  ```
