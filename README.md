@@ -49,3 +49,4 @@ In my case [Scansnap S1300](https://blog.dtpnk.tech/en/install_snapscan/#) - or 
  sudo systemctl start insaned
  
  ```
+ tbd - script the make - udev-rule for scansnap - as insaned runs 'insane' on powerdown...
