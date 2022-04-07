@@ -36,5 +36,11 @@ Prepare your raspberry; tbd
  sudo mkdir /etc/insaned
  sudo mkdir /etc/insaned/events
  sudo cp events/* /etc/insaned/events/
+ sudo cp systemd/insaned.service /etc/systemd/system/
+ sudo systemctl enable insaned
+ sudo touch /etc/default/insaned
+ sudo touch /etc/insaned/events/off
+ sudo chmod a+x /etc/insaned/events/*
+ sudo systemctl start insaned
  
  ```
