@@ -26,7 +26,9 @@ Afterwards the link is added to an Email including the scaned File.
 
 ## Installation on Raspi
 
-Prepare your raspberry; tbd
+Prepare your raspberry; 
+Install your scanner so that `scanimage -L` is working on your raspi; for example with this [tutorial](https://pimylifeup.com/raspberry-pi-scanner-server/)
+
 ```
  sudo apt install sane libsane libsane-dev
  git clone https://github.com/abusenius/insaned.git
