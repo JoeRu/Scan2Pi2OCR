@@ -28,6 +28,7 @@ Afterwards the link is added to an Email including the scaned File.
 
 Prepare your raspberry; 
 Install your scanner so that `scanimage -L` is working on your raspi; for example with this [tutorial](https://www.johndstech.com/how-to/geek-friday-setting-up-epson-scanning-on-raspberry-pi/)
+In my case [Scansnap S1300](https://blog.dtpnk.tech/en/install_snapscan/#) - or check raspi folder
 
 
 ```
