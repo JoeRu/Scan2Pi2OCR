@@ -7,15 +7,15 @@ echo $TMP_DIR
 BASE=$(basename $TMP_DIR)
 echo "$1 und $2"
 echo $(id)
-#chown -R joe:scanner $TMP_DIR
+#chown -R pi:pi $TMP_DIR
 #cp -R $TMP_DIR $OUT_DIR
 #/usr/bin/rsync -avz "$TMP_DIR/" "$OUT_DIR/$BASE/"
-/usr/bin/rsync -avz -e "ssh" "$TMP_DIR/" joe@joesnas:"/MYZFS/Personal/joe/watch_scans/$BASE/"
+/usr/bin/rsync -avz -e "ssh" "$TMP_DIR/" joe@joesnuc:"/home/joe/watch_scans/$BASE/"
 ls -la $OUT_DIR/$BASE
 #cp $TMP_DIR/* .
-echo "/MYZFS/Personal/joe/scan2ocr.sh $BASE" 
+echo "/scan2ocr.sh $BASE" 
 #-t for pseudy tty - sudo docker problem
-ssh joe@joesnas -t "/MYZFS/Personal/joe/scan2ocr.sh $BASE"
+ssh joe@joesnuc -t "/home/joe/scan2ocr.sh $BASE"
 echo "ssh fertig.."
 echo $TMP_DIR
 rm -rf $TMP_DIR

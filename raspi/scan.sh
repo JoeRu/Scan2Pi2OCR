@@ -13,15 +13,16 @@ FILE_NAME=scan_`date +%Y%m%d-%H%M%S`
 
 echo 'scanning...'
 scanimage --resolution 300 \
---batch="$TMP_DIR/scan_%03d.pnm" \
---format=pnm \
+--batch="$TMP_DIR/scan_%03d.pnm.tif" \
+#--format=pnm \
+--format=tiff
 --mode Gray \
 --source 'ADF Duplex'
 echo "Output saved in $TMP_DIR/scan*.pnm"
 
 #problem: scanner runs only with root... insaned.service
-chown -R joe:scanner $TMP_DIR
+chown -R pi:pi $TMP_DIR
 # create new process and free ressources to enable a new scan.
-runuser -l joe -c "$DIR/ocrit.sh $OUT_DIR $TMP_DIR" & 
+runuser -l pi -c "$DIR/ocrit.sh $OUT_DIR $TMP_DIR" & 
 
 echo "send all to OCR"
