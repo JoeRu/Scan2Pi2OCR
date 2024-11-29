@@ -27,7 +27,7 @@ for i in scan_*.pnm.tif; do
         continue
     fi
 #    echo "convert "${i}" -threshold 50% -format %c histogram:info:-)"
-    histogram=$(convert "${i}" -threshold 50% -format %c histogram:info:-)
+    histogram=$(magick "${i}" -threshold 50% -format %c histogram:info:-)
 #    echo "histogramm: $histogram"
     white=$(echo "${histogram}" | grep "(255,255,255)" | cut -d: -f1)
 #   echo "(echo "${histogram}" | grep "white" | cut -d: -f1"
@@ -37,9 +37,9 @@ for i in scan_*.pnm.tif; do
     if [[ -z "$black" ]]; then
         black=0
     fi
-# black below 0.05 Percent of Pixels allover --> than blank
-    blank=$(echo "scale=4; ${black}/${white} < 0.005" | bc)
-#    echo "(echo \"scale=4; ${black}/${white} < 0.005\" | bc)"
+# black below 0.1% of Pixels allover --> than blank
+    blank=$(echo "scale=4; ${black}/${white} < 0.01" | bc)
+#    echo "(echo \"scale=4; ${black}/${white} < 0.01\" | bc)"
 #    echo "xX: $white schwarz: $black blank: $blank"
     if [ "${blank}" -eq "1" ]; then
         echo "${i} seems to be blank - removing it..."
@@ -59,7 +59,7 @@ done
 echo 'cleaning pages...'
 for i in scan_*.pnm.tif; do
     echo "${i}"
-    convert "${i}" -brightness-contrast 1x40% "${i}"
+    magick "${i}" -brightness-contrast 1x40% "${i}"
 done
 
 ## check if there is blank pages
@@ -114,6 +114,7 @@ echo "output file $exp_file"
 
 if [ -f $exp_file ]; then
 
+#copy $exp_file /opt/paperless/paperless-ngx/consume/
 rclone copy $exp_file OneDrive_Joe:scanner/
 onedrive_link=$(rclone link OneDrive_Joe:scanner/$FILE_NAME.pdf)
 
