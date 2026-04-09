@@ -1,0 +1,15 @@
+# Worktrees
+.worktrees/
+
+# Secrets
+.env
+raspi/ocrit.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Temp scan output
+output/
