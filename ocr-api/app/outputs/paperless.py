@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -86,15 +87,20 @@ async def deliver_paperless(
     for tid in tag_ids:
         data_tuples.append(("tags", str(tid)))
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    # httpx 0.27 multipart streams are SyncByteStream — incompatible with AsyncClient.
+    # Run the multipart POST in a thread to avoid the event-loop conflict.
+    def _post_sync() -> httpx.Response:
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
-        response = await client.post(
-            url,
-            headers=auth_headers,
-            files={"document": (f"{file_name}.pdf", pdf_bytes, "application/pdf")},
-            data=data_tuples,
-        )
+        with httpx.Client(timeout=120) as client:
+            return client.post(
+                url,
+                headers=auth_headers,
+                files={"document": (f"{file_name}.pdf", pdf_bytes, "application/pdf")},
+                data=data_tuples,
+            )
+
+    response = await asyncio.to_thread(_post_sync)
     if response.is_error:
         logger.error("Paperless-ngx returned HTTP %d: %s", response.status_code, response.text[:500])
     response.raise_for_status()
