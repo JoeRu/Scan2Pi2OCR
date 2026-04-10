@@ -88,17 +88,19 @@ async def deliver_paperless(
         data_tuples.append(("tags", str(tid)))
 
     # httpx 0.27 multipart streams are SyncByteStream — incompatible with AsyncClient.
-    # Run the multipart POST in a thread to avoid the event-loop conflict.
+    # Also, combining files= and data= (list of tuples) is broken in httpx 0.27/h11
+    # (h11 receives raw tuples instead of encoded bytes).
+    # Workaround: encode ALL form fields as multipart parts inside files= only.
     def _post_sync() -> httpx.Response:
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
+        # Build a single multipart payload: file first, then all form fields.
+        # Form fields use (None, value_bytes) — no filename = plain form part.
+        multipart: list = [("document", (f"{file_name}.pdf", pdf_bytes, "application/pdf"))]
+        for key, value in data_tuples:
+            multipart.append((key, (None, value.encode())))
         with httpx.Client(timeout=120) as client:
-            return client.post(
-                url,
-                headers=auth_headers,
-                files={"document": (f"{file_name}.pdf", pdf_bytes, "application/pdf")},
-                data=data_tuples,
-            )
+            return client.post(url, headers=auth_headers, files=multipart)
 
     response = await asyncio.to_thread(_post_sync)
     if response.is_error:
