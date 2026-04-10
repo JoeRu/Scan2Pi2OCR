@@ -3,7 +3,7 @@ services:
     build: ./ocr-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "192.168.176.224:2480:8000"
     volumes:
       - ./ocr-api/output:/ocr-api/output
       - /etc/localtime:/etc/localtime:ro
@@ -12,7 +12,7 @@ services:
       - .env
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 120s
+      timeout: 20s
       retries: 3
       start_period: 15s

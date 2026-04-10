@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import subprocess
 
 from app.config import get_settings
+
+logger = logging.getLogger("app.outputs.mail")
 
 
 async def deliver_mail(pdf_path: str, file_name: str, txt_path: str) -> dict:
@@ -13,8 +16,8 @@ async def deliver_mail(pdf_path: str, file_name: str, txt_path: str) -> dict:
     try:
         with open(txt_path, "r", errors="replace") as f:
             preview = f.read(3000)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Could not read OCR text for mail preview: %s", exc)
 
     body = (
         "<html><body>"
@@ -25,8 +28,10 @@ async def deliver_mail(pdf_path: str, file_name: str, txt_path: str) -> dict:
         "</body></html>"
     )
 
+    logger.info("Sending mail: to=%s subject=%r", settings.mail_to, subject)
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _send_mail, settings.mail_to, subject, body)
+    logger.info("Mail sent to %s", settings.mail_to)
     return {"mail": {"status": "ok", "to": settings.mail_to}}
 
 
@@ -38,4 +43,6 @@ def _send_mail(to: str, subject: str, body: str) -> None:
         capture_output=True,
     )
     if result.returncode != 0:
+        logger.error("mutt failed (rc=%d)\nstdout: %s\nstderr: %s",
+                     result.returncode, result.stdout.strip(), result.stderr.strip())
         raise RuntimeError(f"mutt failed: {result.stderr}")

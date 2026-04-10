@@ -1,6 +1,6 @@
 # Worktrees
 .worktrees/
-
+rclone.conf
 # Secrets
 .env
 raspi/scan.env
