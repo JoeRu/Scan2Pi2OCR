@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Annotated, List
 
 from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
@@ -91,7 +92,8 @@ async def upload_scan(
         await f.close()
 
     logger.info("All files saved for job %s: %s — enqueueing", job_id, saved)
-    await enqueue_job(job_id, tmp_dir, file_name)
+    scan_timestamp = datetime.now(timezone.utc)
+    await enqueue_job(job_id, tmp_dir, file_name, scan_timestamp)
     return {"job_id": job_id, "status": "queued"}
 
 
