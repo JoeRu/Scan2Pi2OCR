@@ -47,12 +47,20 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str) -> None:
         if settings.enable_mail and settings.mail_to:
             tasks.append(deliver_mail(pdf_path, file_name, txt_path))
 
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         merged = {}
-        for r in results:
-            merged.update(r)
+        errors = {}
+        for coro, result in zip(tasks, results):
+            if isinstance(result, Exception):
+                key = getattr(coro, "__qualname__", repr(coro))
+                errors[key] = str(result)
+            else:
+                merged.update(result)
 
-        _status[job_id] = {"status": "done", "outputs": merged}
+        if errors:
+            _status[job_id] = {"status": "done_with_errors", "outputs": merged, "errors": errors}
+        else:
+            _status[job_id] = {"status": "done", "outputs": merged}
     except Exception as exc:
         _status[job_id] = {"status": "failed", "error": str(exc)}
     finally:
