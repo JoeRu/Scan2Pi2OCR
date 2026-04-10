@@ -51,3 +51,62 @@ In my case [Scansnap S1300](https://blog.dtpnk.tech/en/install_snapscan/#) - or 
  ```
  tbd - script the make - udev-rule for scansnap - as insaned runs 'insane' on powerdown... better use PR of insaned / This fixes the problem
 
+## OCR REST API (New Architecture)
+
+The OCR pipeline is now a containerized REST API service, replacing the previous SSH/rsync-based approach.
+
+### Quick Start
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env with your API key, Paperless token, etc.
+
+# 2. Start the service
+cd ocr-api
+docker compose up -d
+
+# 3. Verify health
+curl http://192.168.176.224:8000/health
+```
+
+### API Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Service health check |
+| `/scan/upload` | POST | Upload scan pages for OCR processing |
+| `/scan/status/{job_id}` | GET | Check job status |
+
+All endpoints except `/health` require the `X-Api-Key` header.
+
+### Raspberry Pi Configuration
+
+On the scanner Pi, configure `raspi/ocrit.env` (copy from `raspi/ocrit.env.example`):
+
+```bash
+cp raspi/ocrit.env.example raspi/ocrit.env
+# Edit with your API host and key
+```
+
+### Output Destinations
+
+Set flags in `.env` to enable one or more output targets simultaneously:
+
+| Flag | Target |
+|------|--------|
+| `ENABLE_FILESYSTEM=true` | Local `output/` directory |
+| `ENABLE_PAPERLESS=true` | Paperless-ngx via REST API |
+| `ENABLE_RCLONE=true` | Cloud via rclone |
+
+### Architecture
+
+```
+Scanner Pi  ──curl POST──▶  OCR API (:8000)
+                                │
+                    ┌───────────┼───────────┐
+                    ▼           ▼           ▼
+              Filesystem   Paperless-ngx  rclone
+               (output/)    (REST API)   (OneDrive)
+```
+

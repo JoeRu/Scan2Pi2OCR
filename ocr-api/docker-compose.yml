@@ -1,0 +1,17 @@
+services:
+  ocr-api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "192.168.176.224:8000:8000"
+    volumes:
+      - ./output:/ocr-api/output
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - ../.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
