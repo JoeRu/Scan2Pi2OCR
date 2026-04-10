@@ -25,17 +25,21 @@ async def _lookup_or_create(
     try:
         resp = await client.get(
             f"{base_url}/api/{resource}/",
-            params={"name": name},
+            params={"name": name, "page_size": 1000},
             headers=headers,
         )
         resp.raise_for_status()
         results = resp.json().get("results", [])
-        logger.debug("Paperless %s search %r → %d result(s)", resource, name, len(results))
-        if results:
-            entity_id = results[0]["id"]
+        exact = [r for r in results if r["name"].lower() == name.lower()]
+        logger.debug(
+            "Paperless %s search %r → %d result(s), %d exact match(es)",
+            resource, name, len(results), len(exact),
+        )
+        if exact:
+            entity_id = exact[0]["id"]
             logger.debug("Paperless %s %r → found id=%s", resource, name, entity_id)
             return entity_id
-        logger.debug("Paperless %s %r → not found, creating", resource, name)
+        logger.debug("Paperless %s %r → no exact match, creating", resource, name)
         create_resp = await client.post(
             f"{base_url}/api/{resource}/",
             json={"name": name},
