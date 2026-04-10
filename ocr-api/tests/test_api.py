@@ -54,7 +54,25 @@ def test_upload_returns_job_id(client, tmp_path):
     assert body["status"] == "queued"
 
 
-def test_status_not_found(client):
+def test_status_returns_queued(client):
+    """A job that was queued shows 'queued' status."""
+    import app.worker as worker_mod
+    worker_mod._status["known-job-id"] = {"status": "queued"}
+    resp = client.get("/scan/status/known-job-id", headers={"x-api-key": "test-key"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "queued"
+
+
+def test_status_returns_done(client):
+    """A completed job returns its output metadata."""
+    import app.worker as worker_mod
+    worker_mod._status["done-job-id"] = {"status": "done", "outputs": {"paperless": {"task_id": "abc"}}}
+    resp = client.get("/scan/status/done-job-id", headers={"x-api-key": "test-key"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "done"
+    assert body["outputs"]["paperless"]["task_id"] == "abc"
+
     resp = client.get("/scan/status/nonexistent", headers={"x-api-key": "test-key"})
     assert resp.status_code == 404
 
