@@ -8,7 +8,7 @@ if [[ -f "$SCRIPT_DIR/scan.env" ]]; then
     # shellcheck source=raspi/scan.env
     source "$SCRIPT_DIR/scan.env"
 fi
-: "${OCR_API_HOST:=http://192.168.176.224:8000}"
+: "${OCR_API_HOST:=http://127.0.0.1:8000}"
 : "${API_KEY:=changeme}"
 
 TMP_DIR=$(mktemp -d)
