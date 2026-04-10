@@ -7,6 +7,7 @@ services:
     volumes:
       - ./output:/ocr-api/output
       - /etc/localtime:/etc/localtime:ro
+      - ${RCLONE_CONFIG_PATH:-/root/.config/rclone/rclone.conf}:/ocr-api/.config/rclone/rclone.conf:ro
     env_file:
       - ../.env
     healthcheck:
