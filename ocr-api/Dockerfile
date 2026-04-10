@@ -29,6 +29,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 COPY app/ /ocr-api/app/
 
 RUN addgroup --system ocr && adduser --system --ingroup ocr --home /ocr-api ocr \
+    && mkdir -p /ocr-api/.config/msmtp /ocr-api/.config/rclone \
     && chown -R ocr:ocr /ocr-api
 USER ocr
 
