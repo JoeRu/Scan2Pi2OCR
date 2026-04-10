@@ -88,12 +88,13 @@ async def deliver_paperless(
 
     async with httpx.AsyncClient(timeout=120) as client:
         with open(pdf_path, "rb") as f:
-            response = await client.post(
-                url,
-                headers=auth_headers,
-                files={"document": (f"{file_name}.pdf", f, "application/pdf")},
-                data=data_tuples,
-            )
+            pdf_bytes = f.read()
+        response = await client.post(
+            url,
+            headers=auth_headers,
+            files={"document": (f"{file_name}.pdf", pdf_bytes, "application/pdf")},
+            data=data_tuples,
+        )
     if response.is_error:
         logger.error("Paperless-ngx returned HTTP %d: %s", response.status_code, response.text[:500])
     response.raise_for_status()
