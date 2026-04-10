@@ -23,28 +23,32 @@ scanimage \
     --source 'ADF Duplex'
 echo "Scan complete: $(ls "$TMP_DIR"/scan_*.pnm.tif 2>/dev/null | wc -l) pages"
 
-# Upload scanned files to OCR REST API
-echo "Uploading to $OCR_API_HOST ..."
-CURL_FILES=()
-for f in "$TMP_DIR"/scan_*.pnm.tif; do
-    CURL_FILES+=(-F "files=@$f")
-done
+# Upload in background so the scanner device is freed immediately
+(
+    echo "Uploading $FILE_NAME to $OCR_API_HOST ..."
+    CURL_FILES=()
+    for f in "$TMP_DIR"/scan_*.pnm.tif; do
+        CURL_FILES+=(-F "files=@$f")
+    done
 
-RESPONSE=$(curl -sf \
-    -H "X-Api-Key: $API_KEY" \
-    "${CURL_FILES[@]}" \
-    "$OCR_API_HOST/scan/upload")
+    RESPONSE=$(curl -sf \
+        -H "X-Api-Key: $API_KEY" \
+        "${CURL_FILES[@]}" \
+        "$OCR_API_HOST/scan/upload")
 
-if [[ $? -ne 0 ]]; then
-    echo "ERROR: Upload to OCR API failed" >&2
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: Upload to OCR API failed" >&2
+        rm -rf "$TMP_DIR"
+        exit 1
+    fi
+
+    JOB_ID=$(echo "$RESPONSE" | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4)
+    echo "OCR job queued: $JOB_ID"
+    echo "Check status: curl -H 'X-Api-Key: \$API_KEY' $OCR_API_HOST/scan/status/$JOB_ID"
+
     rm -rf "$TMP_DIR"
-    exit 1
-fi
-
-JOB_ID=$(echo "$RESPONSE" | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4)
-echo "OCR job queued: $JOB_ID"
-echo "Check status: curl -H 'X-Api-Key: \$API_KEY' $OCR_API_HOST/scan/status/$JOB_ID"
-
-rm -rf "$TMP_DIR"
-echo "Done."
+    echo "Upload done."
+) &
+disown
+echo "Upload dispatched in background (pid=$!). Scanner ready."
 
