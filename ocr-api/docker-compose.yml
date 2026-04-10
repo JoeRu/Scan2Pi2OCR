@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "192.168.176.224:8000:8000"
+      - "8000:8000"
     volumes:
       - ./output:/ocr-api/output
       - /etc/localtime:/etc/localtime:ro

@@ -1,7 +1,6 @@
 #!bash
 # https://github.com/JoeRu/Scan2Pi2OCR
 # Licensed under GPLv3 // Author: Johannes Rumpf - https://web-dreamer.de
-# twitter: @jay_ar
 # 
 # Thanks to Andreas Gohr (http://www.splitbrain.org/) for the initial work
 # https://github.com/splitbrain/paper-backup/
