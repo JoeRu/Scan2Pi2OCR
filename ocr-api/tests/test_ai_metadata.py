@@ -1,9 +1,11 @@
 import json
 import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.ai_metadata import AiMetadata, extract_ai_metadata, sanitize_filename_part
+import httpx
+
+from app.ai_metadata import AiMetadata, extract_ai_metadata, sanitize_filename_part, _build_prompt
 from app.config import Settings
 
 
@@ -172,13 +174,25 @@ async def test_extract_ai_metadata_missing_file():
 
 
 # ---------------------------------------------------------------------------
-# Language-aware prompt: de vs en
+# extract_ai_metadata — HTTP error response → returns None
 # ---------------------------------------------------------------------------
 
-from app.ai_metadata import _build_prompt
+@pytest.mark.asyncio
+async def test_extract_ai_metadata_http_error(tmp_path):
+    txt = tmp_path / "scan.txt"
+    txt.write_text("Some text.", encoding="utf-8")
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "401 Unauthorized", request=MagicMock(), response=MagicMock()
+    )
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        result = await extract_ai_metadata(str(txt), SCAN_TS, BASE_SETTINGS)
+    assert result is None
 
 
-def test_prompt_de_contains_german_header():
+# ---------------------------------------------------------------------------
+# Language-aware prompt: de vs en
+# ---------------------------------------------------------------------------
     prompt = _build_prompt("test text", "de", ["Rechnung", "Vertrag"])
     assert "Dokumentenklassifikator" in prompt
     assert "Rechnung, Vertrag" in prompt

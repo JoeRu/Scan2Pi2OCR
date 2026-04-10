@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import httpx
@@ -96,6 +96,7 @@ async def extract_ai_metadata(
 
         data = response.json()
         content = data["choices"][0]["message"]["content"]
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
         metadata = json.loads(content)
 
         ts = scan_timestamp.strftime("%Y%m%d_%H%M%S")
