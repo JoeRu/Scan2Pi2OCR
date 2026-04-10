@@ -46,13 +46,14 @@ async def upload_scan(
 ):
     job_id = str(uuid.uuid4())
     tmp_dir = tempfile.mkdtemp(prefix=f"scan_{job_id}_")
+    file_name = os.path.splitext(os.path.basename(files[0].filename or "scan"))[0]
     for f in files:
         safe_name = os.path.basename(f.filename or f"file_{uuid.uuid4()}")
         dest = os.path.join(tmp_dir, safe_name)
         with open(dest, "wb") as out:
             shutil.copyfileobj(f.file, out)
         await f.close()
-    await enqueue_job(job_id, tmp_dir)
+    await enqueue_job(job_id, tmp_dir, file_name)
     return {"job_id": job_id, "status": "queued"}
 
 
