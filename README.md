@@ -98,6 +98,65 @@ Set flags in `.env` to enable one or more output targets simultaneously:
 | `ENABLE_FILESYSTEM=true` | Local `output/` directory |
 | `ENABLE_PAPERLESS=true` | Paperless-ngx via REST API |
 | `ENABLE_RCLONE=true` | Cloud via rclone |
+| `ENABLE_MAIL=true` | E-Mail-Benachrichtigung mit OCR-Textvorschau |
+
+### rclone konfigurieren (ohne lokale rclone-Installation)
+
+Die `rclone.conf` wird per Volume-Mount in den Container eingebunden (Pfad: `RCLONE_CONFIG_PATH` in `.env`).
+Zum Anlegen der Config ohne lokales rclone gibt es zwei Wege:
+
+#### Weg 1: `docker exec` mit interaktivem Config-Wizard
+
+```bash
+# Container temporär starten (ohne den normalen Dienst)
+docker compose -f ocr-api/docker-compose.yml run --rm --entrypoint bash ocr-api
+
+# Im Container:
+rclone config
+# → Wizard folgen: n (New remote) → Name → Microsoft OneDrive → ...
+# Am Ende: Config liegt unter /ocr-api/.config/rclone/rclone.conf
+# ABER: das ist nur im laufenden Container – beim Stopp weg!
+```
+
+> **Problem bei OAuth (OneDrive):** rclone öffnet eine Browser-URL für die Anmeldung.
+> In einem headless Container funktioniert das nicht direkt.
+> Lösung: **Auto-Token auf einem anderen Rechner** (Weg 1b) oder **Weg 2**.
+
+#### Weg 1b: Headless OAuth – Token von anderem Rechner übertragen
+
+Auf einem Rechner **mit Browser und rclone installiert**:
+
+```bash
+rclone authorize "onedrive"
+# Browser öffnet sich → Microsoft-Login → Token wird ausgegeben
+# Token kopieren (JSON-Block zwischen { ... })
+```
+
+Dann im Container-Wizard bei der Frage `Use auto config?` → `n` → Token einfügen.
+
+#### Weg 2: Fertige Config von einem anderen Rechner kopieren
+
+Falls rclone irgendwo bereits konfiguriert ist:
+
+```bash
+# Config auf den Server übertragen
+scp ~/.config/rclone/rclone.conf user@server:/root/.config/rclone/rclone.conf
+
+# Sicherstellen dass RCLONE_CONFIG_PATH in .env stimmt:
+RCLONE_CONFIG_PATH=/root/.config/rclone/rclone.conf
+```
+
+#### Konfiguration testen
+
+```bash
+# Nach dem Start des Containers – rclone im laufenden Container testen:
+docker compose -f ocr-api/docker-compose.yml exec ocr-api \
+    rclone lsd OneDrive_xx:
+
+# Oder direkt ein File hochladen:
+docker compose -f ocr-api/docker-compose.yml exec ocr-api \
+    rclone copy /ocr-api/output/test.pdf OneDrive_xx:scanner/
+```
 
 ### Architecture
 
