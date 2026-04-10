@@ -30,15 +30,21 @@ async def _lookup_or_create(
         )
         resp.raise_for_status()
         results = resp.json().get("results", [])
+        logger.debug("Paperless %s search %r → %d result(s)", resource, name, len(results))
         if results:
-            return results[0]["id"]
+            entity_id = results[0]["id"]
+            logger.debug("Paperless %s %r → found id=%s", resource, name, entity_id)
+            return entity_id
+        logger.debug("Paperless %s %r → not found, creating", resource, name)
         create_resp = await client.post(
             f"{base_url}/api/{resource}/",
             json={"name": name},
             headers=headers,
         )
         create_resp.raise_for_status()
-        return create_resp.json()["id"]
+        entity_id = create_resp.json()["id"]
+        logger.info("Paperless %s created: %r → id=%s", resource, name, entity_id)
+        return entity_id
     except Exception as exc:
         logger.warning("Could not look up/create Paperless %s %r: %s", resource, name, exc)
         return None
@@ -86,6 +92,11 @@ async def deliver_paperless(
         data_tuples.append(("document_type", str(document_type_id)))
     for tid in tag_ids:
         data_tuples.append(("tags", str(tid)))
+
+    logger.info(
+        "Paperless upload fields: correspondent_id=%s document_type_id=%s tag_ids=%s",
+        correspondent_id, document_type_id, tag_ids,
+    )
 
     # httpx 0.27 multipart streams are SyncByteStream — incompatible with AsyncClient.
     # Also, combining files= and data= (list of tuples) is broken in httpx 0.27/h11
