@@ -16,10 +16,15 @@ class Settings(BaseSettings):
     rclone_target: str = "OneDrive_Joe:scanner/"
 
     enable_filesystem: bool = False
-    output_dir: str = "/output"
+    output_dir: str = "/ocr-api/output"
 
     ocr_language: str = "deu+eng+frk"
     trash_tmp_files: bool = True
+
+    enable_ai_metadata: bool = False
+    openrouter_api_key: str = ""
+    openrouter_model: str = "anthropic/claude-haiku-4.5"
+    ai_document_language: str = "de"
 
     enable_mail: bool = False
     mail_to: str = ""
