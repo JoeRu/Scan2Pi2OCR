@@ -2,7 +2,11 @@ import asyncio
 import logging
 import os
 import shutil
+from datetime import datetime
 
+import httpx
+
+from app.ai_metadata import AiMetadata, extract_ai_metadata
 from app.config import get_settings
 from app.ocr import process_scan
 from app.outputs.filesystem import deliver_filesystem
@@ -23,9 +27,9 @@ def _get_queue() -> asyncio.Queue:
     return _queue
 
 
-async def enqueue_job(job_id: str, tmp_dir: str, file_name: str) -> None:
+async def enqueue_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp: datetime) -> None:
     _status[job_id] = {"status": "queued"}
-    await _get_queue().put((job_id, tmp_dir, file_name))
+    await _get_queue().put((job_id, tmp_dir, file_name, scan_timestamp))
     logger.info("Job queued: job_id=%s name=%r", job_id, file_name)
 
 
@@ -33,7 +37,22 @@ def get_job_status(job_id: str) -> dict | None:
     return _status.get(job_id)
 
 
-async def _process_job(job_id: str, tmp_dir: str, file_name: str) -> None:
+async def _fetch_paperless_document_types(settings) -> list[str] | None:
+    """Fetch document type names from Paperless-ngx. Returns None on failure."""
+    try:
+        url = f"{settings.paperless_url.rstrip('/')}/api/document_types/?page_size=100"
+        headers = {"Authorization": f"Token {settings.paperless_token}"}
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+        data = response.json()
+        return [item["name"] for item in data.get("results", [])]
+    except Exception as exc:
+        logger.warning("Could not fetch Paperless document types: %s", exc)
+        return None
+
+
+async def _process_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp: datetime) -> None:
     settings = get_settings()
     logger.info("Job started: job_id=%s name=%r", job_id, file_name)
     try:
@@ -45,13 +64,27 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str) -> None:
         txt_path = ocr_result["txt"]
         logger.info("[%s] OCR complete — pdf=%s", job_id, pdf_path)
 
+        ai_meta: AiMetadata | None = None
+        if settings.enable_ai_metadata:
+            logger.info("[%s] Running AI metadata extraction", job_id)
+            document_types: list[str] | None = None
+            if settings.enable_paperless:
+                document_types = await _fetch_paperless_document_types(settings)
+            ai_meta = await extract_ai_metadata(txt_path, scan_timestamp, settings, document_types)
+            if ai_meta:
+                logger.info("[%s] AI metadata: dokumenttyp=%r korrespondent=%r filename_stem=%r",
+                            job_id, ai_meta.dokumenttyp, ai_meta.korrespondent, ai_meta.filename_stem)
+                file_name = ai_meta.filename_stem
+            else:
+                logger.warning("[%s] AI metadata unavailable, using original filename", job_id)
+
         tasks = []
         task_names = []
         if settings.enable_filesystem:
             tasks.append(deliver_filesystem(pdf_path, file_name))
             task_names.append("filesystem")
         if settings.enable_paperless:
-            tasks.append(deliver_paperless(pdf_path, file_name))
+            tasks.append(deliver_paperless(pdf_path, file_name, ai_meta if settings.enable_ai_metadata else None))
             task_names.append("paperless")
         if settings.enable_rclone:
             tasks.append(deliver_rclone(pdf_path, file_name))
@@ -96,9 +129,9 @@ async def worker_loop() -> None:
     logger.info("Worker loop ready")
     try:
         while True:
-            job_id, tmp_dir, file_name = await _queue.get()
+            job_id, tmp_dir, file_name, scan_timestamp = await _queue.get()
             logger.debug("Dequeued job_id=%s", job_id)
-            asyncio.create_task(_process_job(job_id, tmp_dir, file_name))
+            asyncio.create_task(_process_job(job_id, tmp_dir, file_name, scan_timestamp))
             _queue.task_done()
     except asyncio.CancelledError:
         logger.info("Worker loop cancelled")
