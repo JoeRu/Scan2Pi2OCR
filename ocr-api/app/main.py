@@ -17,6 +17,10 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(worker_loop())
     yield
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="Scan2OCR API", lifespan=lifespan)
@@ -43,9 +47,11 @@ async def upload_scan(
     job_id = str(uuid.uuid4())
     tmp_dir = tempfile.mkdtemp(prefix=f"scan_{job_id}_")
     for f in files:
-        dest = os.path.join(tmp_dir, f.filename)
+        safe_name = os.path.basename(f.filename or f"file_{uuid.uuid4()}")
+        dest = os.path.join(tmp_dir, safe_name)
         with open(dest, "wb") as out:
             shutil.copyfileobj(f.file, out)
+        await f.close()
     await enqueue_job(job_id, tmp_dir)
     return {"job_id": job_id, "status": "queued"}
 
