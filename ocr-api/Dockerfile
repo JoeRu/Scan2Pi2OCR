@@ -19,9 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# ImageMagick: allow read/write of TIF files in /tmp (default policy is too restrictive)
+RUN sed -i 's|<policy domain="coder" rights="none" pattern="TIFF"|<policy domain="coder" rights="read|write" pattern="TIFF"|g' \
+        /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+
 WORKDIR /ocr-api
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 COPY app/ /ocr-api/app/
 
 RUN addgroup --system ocr && adduser --system --ingroup ocr --home /ocr-api ocr \

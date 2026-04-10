@@ -54,6 +54,8 @@ def run_tesseract(tmp_dir: str, file_name: str) -> None:
     """Write scan_list.txt and run Tesseract. Outputs file_name.pdf/.txt/.hocr."""
     settings = get_settings()
     pages = sorted(Path(tmp_dir).glob("scan_*.pnm.tif"))
+    if not pages:
+        raise RuntimeError("No pages remaining after blank page removal – nothing to OCR.")
     list_file = os.path.join(tmp_dir, "scan_list.txt")
     with open(list_file, "w") as f:
         for p in pages:

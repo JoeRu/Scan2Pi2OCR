@@ -20,14 +20,13 @@ password       ${SMTP_PASSWORD}
 EOF
     chmod 600 /ocr-api/.config/msmtp/config
 
-    # Point mutt at msmtp as sendmail
-    mkdir -p /ocr-api/.config/mutt
-    cat > /ocr-api/.config/mutt/muttrc <<EOF
+    # Write mutt config to $HOME/.muttrc (= /ocr-api/.muttrc for the ocr user)
+    # mutt reads $HOME/.muttrc automatically; MUTT_HOME is NOT a mutt variable.
+    cat > /ocr-api/.muttrc <<EOF
 set sendmail="/usr/bin/msmtp"
 set use_from=yes
 set from="${SMTP_FROM:-${SMTP_USER}}"
 EOF
-    export MUTT_HOME=/ocr-api/.config/mutt
 fi
 
 exec "$@"
