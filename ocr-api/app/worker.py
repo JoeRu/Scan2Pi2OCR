@@ -5,6 +5,7 @@ import shutil
 from app.config import get_settings
 from app.ocr import process_scan
 from app.outputs.filesystem import deliver_filesystem
+from app.outputs.mail import deliver_mail
 from app.outputs.paperless import deliver_paperless
 from app.outputs.rclone import deliver_rclone
 
@@ -34,6 +35,7 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str) -> None:
         _status[job_id] = {"status": "processing"}
         ocr_result = await process_scan(tmp_dir, file_name)
         pdf_path = ocr_result["pdf"]
+        txt_path = ocr_result["txt"]
 
         tasks = []
         if settings.enable_filesystem:
@@ -42,6 +44,8 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str) -> None:
             tasks.append(deliver_paperless(pdf_path, file_name))
         if settings.enable_rclone:
             tasks.append(deliver_rclone(pdf_path, file_name))
+        if settings.enable_mail and settings.mail_to:
+            tasks.append(deliver_mail(pdf_path, file_name, txt_path))
 
         results = await asyncio.gather(*tasks)
         merged = {}

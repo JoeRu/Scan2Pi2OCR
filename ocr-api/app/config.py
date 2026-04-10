@@ -20,7 +20,14 @@ class Settings(BaseSettings):
 
     ocr_language: str = "deu+eng+frk"
     trash_tmp_files: bool = True
+
+    enable_mail: bool = False
     mail_to: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
 
 
 @lru_cache
