@@ -3,7 +3,7 @@
 
 # Secrets
 .env
-raspi/ocrit.env
+raspi/scan.env
 
 # Python
 __pycache__/

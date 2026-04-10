@@ -1,14 +1,12 @@
 #!/bin/bash
-# Thanks to Andreas Gohr (http://www.splitbrain.org/) for the initial work
-# https://github.com/splitbrain/paper-backup/
 exec 1> >(logger -s -t $(basename $0)) 2>&1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load API config (OCR_API_HOST, API_KEY)
-if [[ -f "$SCRIPT_DIR/ocrit.env" ]]; then
-    # shellcheck source=raspi/ocrit.env
-    source "$SCRIPT_DIR/ocrit.env"
+if [[ -f "$SCRIPT_DIR/scan.env" ]]; then
+    # shellcheck source=raspi/scan.env
+    source "$SCRIPT_DIR/scan.env"
 fi
 : "${OCR_API_HOST:=http://192.168.176.224:8000}"
 : "${API_KEY:=changeme}"

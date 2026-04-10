@@ -10,11 +10,9 @@ For use of Buttons is used [insaned](https://github.com/abusenius/insaned)
 
 
 The Process is to be as followed:
-insaned on the RASPi is calling the script scan.sh from the raspi folder.
-Please adapt path in file insaned/events/scan and make it executable. 
-To enable more scans this script creates a new process for the ocr-task calling ocrit.sh with &.
-
-ocrit.sh manages to transfer the data to the target scanning device - and starts the final OCR-Process there with a ssh execution call.
+insaned on the RASPi is calling the script `raspi/scan.sh`.
+Please adapt path in file `insaned/events/scan` and make it executable.
+`scan.sh` scans all pages and uploads them directly to the OCR REST API via curl.
 
 With this version - supported is the use of tesseract and abby-cloud. 
 Abby has really good ocr-capabilities (but payed and with price-politics only good for big count of pages recognition) - still better (at least in German) than tesseract; but [tesseract4](https://github.com/tesseract-ocr/tesseract) with LTSM and (_important_) use of the -l language parameter is really good as well.
@@ -82,10 +80,10 @@ All endpoints except `/health` require the `X-Api-Key` header.
 
 ### Raspberry Pi Configuration
 
-On the scanner Pi, configure `raspi/ocrit.env` (copy from `raspi/ocrit.env.example`):
+On the scanner Pi, configure `raspi/scan.env` (copy from `raspi/scan.env.example`):
 
 ```bash
-cp raspi/ocrit.env.example raspi/ocrit.env
+cp raspi/scan.env.example raspi/scan.env
 # Edit with your API host and key
 ```
 
