@@ -42,7 +42,7 @@ async def _lookup_or_create(
         logger.debug("Paperless %s %r → no exact match, creating", resource, name)
         create_resp = await client.post(
             f"{base_url}/api/{resource}/",
-            json={"name": name},
+            json={"name": name, "owner": None},
             headers=headers,
         )
         create_resp.raise_for_status()
