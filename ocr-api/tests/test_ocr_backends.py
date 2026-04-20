@@ -2,6 +2,8 @@ import pytest
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 from app.ocr_backends.base import OcrBackend
+from app.ocr_backends import get_backend
+from app.ocr_backends.tesseract import TesseractBackend
 
 
 def test_ocr_backend_protocol_is_checkable():
@@ -131,3 +133,25 @@ def test_tesseract_run_raises_on_subprocess_failure(tmp_path):
                return_value=MagicMock(returncode=1, stdout="", stderr="tesseract failed")):
         with pytest.raises(RuntimeError, match="Tesseract failed"):
             TesseractBackend().run([page], "deu")
+
+
+def test_get_backend_tesseract():
+    backend = get_backend("tesseract")
+    assert isinstance(backend, TesseractBackend)
+
+
+def test_get_backend_unknown_raises():
+    with pytest.raises(ValueError, match="Unknown OCR engine"):
+        get_backend("nonexistent")
+
+
+def test_get_backend_paddleocr_returns_backend():
+    from app.ocr_backends.paddleocr import PaddleOcrBackend
+    backend = get_backend("paddleocr")
+    assert isinstance(backend, PaddleOcrBackend)
+
+
+def test_get_backend_gcv_returns_backend():
+    from app.ocr_backends.gcv import GoogleCloudVisionBackend
+    backend = get_backend("gcv")
+    assert isinstance(backend, GoogleCloudVisionBackend)

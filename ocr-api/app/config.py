@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     output_dir: str = "/ocr-api/output"
 
     ocr_language: str = "deu+eng+frk"
+    ocr_engine: str = "tesseract"
     trash_tmp_files: bool = True
 
     enable_ai_metadata: bool = False
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
+
+    gcv_credentials_file: str = ""
+    gcv_project_id: str = ""
 
 
 @lru_cache
