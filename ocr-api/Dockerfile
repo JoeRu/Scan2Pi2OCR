@@ -26,6 +26,14 @@ RUN sed -i 's|<policy domain="coder" rights="none" pattern="TIFF"|<policy domain
 WORKDIR /ocr-api
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+
+# Pre-download PaddleOCR models so first-run latency is avoided.
+# Adds ~600 MB to the image; remove this block if image size matters more than cold-start speed.
+RUN python3 -c "\
+from paddleocr import PaddleOCR; \
+PaddleOCR(lang='german', show_log=False); \
+PaddleOCR(lang='en', show_log=False)" || true
+
 COPY app/ /ocr-api/app/
 
 RUN addgroup --system ocr && adduser --system --ingroup ocr --home /ocr-api ocr \
