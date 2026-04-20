@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bc \
     python3 \
     python3-pip \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # ImageMagick: allow read/write of TIF files in /tmp (default policy is too restrictive)
