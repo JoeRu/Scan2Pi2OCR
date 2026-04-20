@@ -155,3 +155,55 @@ def test_get_backend_gcv_returns_backend():
     from app.ocr_backends.gcv import GoogleCloudVisionBackend
     backend = get_backend("gcv")
     assert isinstance(backend, GoogleCloudVisionBackend)
+
+
+from app.ocr_backends.paddleocr import PaddleOcrBackend
+
+
+def test_paddleocr_run_returns_text(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+
+    fake_result = [[
+        [[[0, 0], [10, 0], [10, 10], [0, 10]], ("Hello World", 0.99)],
+        [[[0, 12], [10, 12], [10, 22], [0, 22]], ("Second line", 0.95)],
+    ]]
+
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
+        mock_ocr_instance = MagicMock()
+        mock_ocr_instance.ocr.return_value = fake_result
+        MockOCR.return_value = mock_ocr_instance
+
+        backend = PaddleOcrBackend()
+        result = backend.run([page], "deu+eng")
+
+    assert "Hello World" in result
+    assert "Second line" in result
+
+
+def test_paddleocr_run_handles_empty_result(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
+        mock_ocr_instance = MagicMock()
+        mock_ocr_instance.ocr.return_value = [[]]
+        MockOCR.return_value = mock_ocr_instance
+
+        result = PaddleOcrBackend().run([page], "deu")
+
+    assert result == ""
+
+
+def test_paddleocr_language_mapping():
+    backend = PaddleOcrBackend()
+    assert backend._map_language("deu+eng+frk") == "german"
+    assert backend._map_language("eng") == "en"
+    assert backend._map_language("deu") == "german"
+    assert backend._map_language("frk") == "german"
+    assert backend._map_language("unknown") == "en"
+
+
+def test_paddleocr_run_raises_on_empty_pages():
+    with pytest.raises(ValueError, match="No pages"):
+        PaddleOcrBackend().run([], "deu")
