@@ -96,6 +96,17 @@ Pydantic `Settings` loaded from `.env`. `get_settings()` is `lru_cache`-wrapped 
 
 Two tests in `test_paperless.py` are pre-existing failures unrelated to the OCR backend work.
 
+## Docker smoke test
+
+After any change to `ocr-api/Dockerfile`, `ocr-api/requirements.txt`, or the `ocr-api/app/` source, rebuild the image and verify it starts cleanly before committing:
+
+```bash
+docker compose build --no-cache 2>&1 | grep -E "error|ERROR|failed|FAILED|ImportError" | grep -iv "warn"
+docker compose up -d && sleep 5 && curl -sf http://localhost:9000/health
+```
+
+The build must produce no errors and `/health` must return `{"status":"ok"}`.
+
 ## Key files on the Raspberry Pi side
 
 - `raspi/scan.sh` — triggered by insaned; calls ocrit.sh
