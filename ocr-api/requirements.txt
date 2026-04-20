@@ -5,5 +5,7 @@ httpx==0.27.0
 pydantic-settings==2.2.1
 fpdf2==2.7.9
 Pillow==10.3.0
+# Note: plan specified paddleocr==2.8.1 / paddlepaddle==2.6.1; those versions were unavailable.
+# 3.x API is compatible: result[0] is a list of [bbox, (text, confidence)] per line.
 paddleocr==3.4.1
 paddlepaddle==3.3.1

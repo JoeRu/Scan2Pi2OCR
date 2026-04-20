@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     output_dir: str = "/ocr-api/output"
 
     ocr_language: str = "deu+eng+frk"
-    ocr_engine: str = "tesseract"
+    ocr_engine: Literal["tesseract", "paddleocr", "gcv"] = "tesseract"
     trash_tmp_files: bool = True
 
     enable_ai_metadata: bool = False

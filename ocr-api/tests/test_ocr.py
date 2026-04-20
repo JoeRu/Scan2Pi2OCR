@@ -59,6 +59,15 @@ def test_process_scan_uses_backend(tmp_path):
     mock_backend.run.assert_called_once()
 
 
+def test_process_scan_raises_when_all_pages_blank(tmp_path):
+    # No .tif files in tmp_path after blank removal — glob returns empty list
+    with patch("app.ocr.get_settings", return_value=_settings_with_engine("tesseract")), \
+         patch("app.ocr.remove_blank_pages"), \
+         patch("app.ocr.get_backend"):
+        with pytest.raises(RuntimeError, match="No pages remaining"):
+            asyncio.run(_process_scan(str(tmp_path), "output"))
+
+
 def _process_scan(tmp_dir, file_name):
     from app.ocr import process_scan
     return process_scan(tmp_dir, file_name)
