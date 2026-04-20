@@ -207,3 +207,18 @@ def test_paddleocr_language_mapping():
 def test_paddleocr_run_raises_on_empty_pages():
     with pytest.raises(ValueError, match="No pages"):
         PaddleOcrBackend().run([], "deu")
+
+
+from app.ocr_backends.gcv import GoogleCloudVisionBackend
+
+
+def test_gcv_stub_raises_not_implemented(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+    with pytest.raises(NotImplementedError, match="not yet implemented"):
+        GoogleCloudVisionBackend().run([page], "deu")
+
+
+def test_gcv_stub_raises_on_empty_pages():
+    with pytest.raises((ValueError, NotImplementedError)):
+        GoogleCloudVisionBackend().run([], "deu")
