@@ -46,7 +46,24 @@ def test_build_searchable_pdf_text_in_content(tmp_path):
     raw = out.read_bytes()
     # PDF content streams may be compressed; check the uncompressed raw bytes
     # for our text OR check that the PDF contains the text in a readable form
-    assert b"searchable" in raw or b"searchable text here" in raw.decode("latin-1", errors="replace").encode()
+    assert b"searchable" in raw
+
+
+def _make_realistic_tif(path: _Path) -> None:
+    """248×350 px at 300 DPI ≈ 21×29.7 mm (A4 proxy)."""
+    from PIL import Image
+    img = Image.new("RGB", (248, 350), (255, 255, 255))
+    img.save(str(path), dpi=(300, 300))
+
+
+def test_build_searchable_pdf_realistic_page(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    build_searchable_pdf([page], "realistic page text", out)
+    raw = out.read_bytes()
+    assert out.stat().st_size > 0
+    assert b"realistic" in raw
 
 
 def test_build_searchable_pdf_multi_page(tmp_path):

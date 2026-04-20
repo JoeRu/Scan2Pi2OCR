@@ -2,9 +2,14 @@ import logging
 from pathlib import Path
 
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 from PIL import Image
 
 logger = logging.getLogger("app.ocr_backends.build_pdf")
+
+
+def _pdf_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> None:
@@ -28,6 +33,8 @@ def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> Non
         pdf.add_page(format=(w_mm, h_mm))
         pdf.image(str(page_path), x=0, y=0, w=w_mm, h=h_mm)
 
+        # All extracted text goes on page 1 only — per-page placement requires
+        # OcrBackend to return per-page strings, which is a future enhancement.
         if i == 0 and text:
             # Invisible white text layer — searchable but not visible
             pdf.set_text_color(255, 255, 255)
@@ -36,12 +43,10 @@ def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> Non
             pdf.set_xy(0, 0)
             try:
                 pdf.multi_cell(w=w_mm, h=1, text=text)
-            except Exception:
+            except FPDFException:
                 # Page may be too small for multi_cell wrapping;
                 # write text directly into the page content bytearray
-                raw_op = (
-                    f"BT /F1 1 Tf 0 0 Td ({text}) Tj ET\n"
-                ).encode("latin-1", errors="replace")
+                raw_op = f"BT /F1 1 Tf 0 0 Td ({_pdf_escape(text)}) Tj ET\n".encode("latin-1", errors="replace")
                 pdf.pages[pdf.page].contents.extend(raw_op)
             pdf.set_text_color(0, 0, 0)
 
