@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 import os
 import re
@@ -6,6 +7,8 @@ import subprocess
 from pathlib import Path
 
 from app.config import get_settings
+from app.ocr_backends import get_backend
+from app.ocr_backends.build_pdf import build_searchable_pdf
 
 logger = logging.getLogger("app.ocr")
 
@@ -63,48 +66,46 @@ def clean_page(page_path: str) -> None:
     _run(["convert", page_path, "-brightness-contrast", "1x40%", page_path])
 
 
-def run_tesseract(tmp_dir: str, file_name: str) -> None:
-    """Write scan_list.txt and run Tesseract. Outputs file_name.pdf/.txt/.hocr."""
-    settings = get_settings()
-    pages = sorted(Path(tmp_dir).glob("scan_*.pnm.tif"))
-    if not pages:
-        logger.error("No pages remaining after blank page removal in %s", tmp_dir)
-        raise RuntimeError("No pages remaining after blank page removal – nothing to OCR.")
-    list_file = os.path.join(tmp_dir, "scan_list.txt")
-    with open(list_file, "w") as f:
-        for p in pages:
-            f.write(p.name + "\n")
-    logger.info("Running Tesseract on %d page(s), language=%s", len(pages), settings.ocr_language)
-    _run([
-        "tesseract", "scan_list.txt", file_name,
-        "--dpi", "300",
-        "--oem", "1",
-        "-l", settings.ocr_language,
-        "--psm", "1",
-        "txt", "pdf", "hocr",
-    ], cwd=tmp_dir)
-    logger.info("Tesseract finished — output: %s.{pdf,txt,hocr}", file_name)
-
-
 async def process_scan(tmp_dir: str, file_name: str) -> dict:
     """Full OCR pipeline. Returns dict with paths to output files."""
     loop = asyncio.get_running_loop()
+    settings = get_settings()
 
-    logger.info("OCR pipeline start: tmp_dir=%s name=%r", tmp_dir, file_name)
+    logger.info("OCR pipeline start: tmp_dir=%s name=%r engine=%s",
+                tmp_dir, file_name, settings.ocr_engine)
 
     logger.info("Step 1/3: Blank page removal")
     await loop.run_in_executor(None, remove_blank_pages, tmp_dir)
 
     pages = sorted(Path(tmp_dir).glob("scan_*.pnm.tif"))
+    if not pages:
+        raise RuntimeError("No pages remaining after blank page removal – nothing to OCR.")
+
     logger.info("Step 2/3: Contrast cleanup on %d page(s)", len(pages))
     for page in pages:
         await loop.run_in_executor(None, clean_page, str(page))
 
-    logger.info("Step 3/3: OCR (Tesseract)")
-    await loop.run_in_executor(None, run_tesseract, tmp_dir, file_name)
+    pages = sorted(Path(tmp_dir).glob("scan_*.pnm.tif"))
 
+    logger.info("Step 3/3: OCR (%s)", settings.ocr_engine)
+    backend = get_backend(settings.ocr_engine)
+    text = await loop.run_in_executor(
+        None,
+        functools.partial(backend.run, pages, settings.ocr_language),
+    )
+
+    pdf_path = Path(tmp_dir) / f"{file_name}.pdf"
+    txt_path = Path(tmp_dir) / f"{file_name}.txt"
+
+    await loop.run_in_executor(
+        None,
+        functools.partial(build_searchable_pdf, pages, text, pdf_path),
+    )
+    txt_path.write_text(text)
+
+    logger.info("OCR pipeline done: %s.{pdf,txt}", file_name)
     return {
-        "pdf": os.path.join(tmp_dir, f"{file_name}.pdf"),
-        "txt": os.path.join(tmp_dir, f"{file_name}.txt"),
+        "pdf": str(pdf_path),
+        "txt": str(txt_path),
         "file_name": file_name,
     }
