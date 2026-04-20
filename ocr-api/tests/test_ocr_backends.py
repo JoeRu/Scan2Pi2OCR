@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 from app.ocr_backends.base import OcrBackend
@@ -77,3 +78,56 @@ def test_build_searchable_pdf_multi_page(tmp_path):
     content = out.read_bytes().decode("latin-1")
     # PDF should declare 3 pages
     assert content.count("/Page\n") >= 3 or "/Count 3" in content
+
+
+from unittest.mock import patch, MagicMock
+from app.ocr_backends.tesseract import TesseractBackend
+
+
+def test_tesseract_run_returns_text(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+    expected_text = "Hallo Welt\n"
+
+    def fake_run(cmd, capture_output, text, cwd):
+        # tesseract writes the output txt file as a side effect
+        (Path(cwd) / "_ocr_out.txt").write_text(expected_text)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("app.ocr_backends.tesseract.subprocess.run", side_effect=fake_run):
+        backend = TesseractBackend()
+        result = backend.run([page], "deu+eng")
+
+    assert result == expected_text
+
+
+def test_tesseract_run_writes_scan_list(tmp_path):
+    page1 = tmp_path / "scan_0001.pnm.tif"
+    page2 = tmp_path / "scan_0002.pnm.tif"
+    page1.touch()
+    page2.touch()
+
+    def fake_run(cmd, capture_output, text, cwd):
+        (Path(cwd) / "_ocr_out.txt").write_text("text")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("app.ocr_backends.tesseract.subprocess.run", side_effect=fake_run):
+        TesseractBackend().run([page1, page2], "deu")
+
+    scan_list = (tmp_path / "scan_list.txt").read_text()
+    assert "scan_0001.pnm.tif" in scan_list
+    assert "scan_0002.pnm.tif" in scan_list
+
+
+def test_tesseract_run_raises_on_empty_pages():
+    with pytest.raises(ValueError, match="No pages"):
+        TesseractBackend().run([], "deu")
+
+
+def test_tesseract_run_raises_on_subprocess_failure(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+    with patch("app.ocr_backends.tesseract.subprocess.run",
+               return_value=MagicMock(returncode=1, stdout="", stderr="tesseract failed")):
+        with pytest.raises(RuntimeError, match="Tesseract failed"):
+            TesseractBackend().run([page], "deu")
