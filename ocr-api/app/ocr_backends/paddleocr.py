@@ -26,7 +26,8 @@ class PaddleOcrBackend:
 
         lang = self._map_language(language)
         logger.info("Running PaddleOCR on %d page(s), mapped language=%s", len(pages), lang)
-        ocr = PaddleOCR(lang=lang)
+        # enable_mkldnn=False: oneDNN triggers a NotImplementedError on some CPUs with PaddlePaddle 3.x
+        ocr = PaddleOCR(lang=lang, enable_mkldnn=False)
 
         page_texts: list[str] = []
         for page in pages:
