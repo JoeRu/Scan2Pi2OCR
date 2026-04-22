@@ -222,16 +222,39 @@ async def test_deliver_paperless_http_error_raises(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lookup_or_create_returns_existing_id():
+    """Existing entity with no owner is returned without a PATCH."""
     client = MagicMock()
     get_resp = MagicMock()
     get_resp.raise_for_status = MagicMock()
-    get_resp.json = MagicMock(return_value={"results": [{"id": 99, "name": "Acme"}]})
+    get_resp.json = MagicMock(return_value={"results": [{"id": 99, "name": "Acme", "owner": None}]})
     client.get = AsyncMock(return_value=get_resp)
 
     result = await _lookup_or_create(client, "https://pl.example.com", "correspondents", "Acme", {})
 
     assert result == 99
     client.get.assert_called_once()
+    client.patch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lookup_or_create_clears_owner_on_private_entity():
+    """Existing entity with an owner gets PATCHed to owner=null to make it globally visible."""
+    client = MagicMock()
+    get_resp = MagicMock()
+    get_resp.raise_for_status = MagicMock()
+    get_resp.json = MagicMock(return_value={"results": [{"id": 77, "name": "Acme", "owner": 3}]})
+    client.get = AsyncMock(return_value=get_resp)
+
+    patch_resp = MagicMock()
+    patch_resp.is_success = True
+    client.patch = AsyncMock(return_value=patch_resp)
+
+    result = await _lookup_or_create(client, "https://pl.example.com", "correspondents", "Acme", {})
+
+    assert result == 77
+    client.patch.assert_called_once()
+    patch_call_body = client.patch.call_args[1]["json"]
+    assert patch_call_body == {"owner": None}
 
 
 @pytest.mark.asyncio

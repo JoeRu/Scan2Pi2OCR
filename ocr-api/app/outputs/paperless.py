@@ -38,6 +38,18 @@ async def _lookup_or_create(
         if exact:
             entity_id = exact[0]["id"]
             logger.debug("Paperless %s %r → found id=%s", resource, name, entity_id)
+            # If the existing entity is privately owned, clear the owner so it becomes
+            # globally visible (Paperless treats owner=null as accessible to all users).
+            if exact[0].get("owner") is not None:
+                patch_resp = await client.patch(
+                    f"{base_url}/api/{resource}/{entity_id}/",
+                    json={"owner": None},
+                    headers=headers,
+                )
+                if patch_resp.is_success:
+                    logger.info("Paperless %s %r: cleared owner to make globally visible", resource, name)
+                else:
+                    logger.debug("Paperless %s %r: could not clear owner (status %d)", resource, name, patch_resp.status_code)
             return entity_id
         logger.debug("Paperless %s %r → no exact match, creating", resource, name)
         create_resp = await client.post(
