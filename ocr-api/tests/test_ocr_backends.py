@@ -1,9 +1,14 @@
 import pytest
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+from PIL import Image as PILImage
 from app.ocr_backends.base import OcrBackend
 from app.ocr_backends import get_backend
 from app.ocr_backends.tesseract import TesseractBackend
+
+
+def _make_tif(path: Path) -> None:
+    PILImage.new("RGB", (10, 10), color=(255, 255, 255)).save(str(path), format="TIFF")
 
 
 def test_ocr_backend_protocol_is_checkable():
@@ -162,7 +167,7 @@ from app.ocr_backends.paddleocr import PaddleOcrBackend
 
 def test_paddleocr_run_returns_text(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
-    page.touch()
+    _make_tif(page)
 
     fake_result = [{"rec_texts": ["Hello World", "Second line"], "rec_scores": [0.99, 0.95]}]
 
@@ -180,7 +185,7 @@ def test_paddleocr_run_returns_text(tmp_path):
 
 def test_paddleocr_run_handles_empty_result(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
-    page.touch()
+    _make_tif(page)
 
     with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
         mock_ocr_instance = MagicMock()
