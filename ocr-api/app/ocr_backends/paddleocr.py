@@ -22,16 +22,16 @@ class PaddleOcrBackend:
 
         lang = self._map_language(language)
         logger.info("Running PaddleOCR on %d page(s), mapped language=%s", len(pages), lang)
-        ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+        ocr = PaddleOCR(lang=lang)
 
         page_texts: list[str] = []
         for page in pages:
-            result = ocr.ocr(str(page), cls=True)
-            if not result or not result[0]:
+            results = ocr.predict(str(page), use_textline_orientation=True)
+            if not results:
                 page_texts.append("")
                 continue
-            lines = [line[1][0] for line in result[0] if line and line[1]]
-            page_texts.append("\n".join(lines))
+            rec_texts: list[str] = results[0].get("rec_texts") or []
+            page_texts.append("\n".join(rec_texts))
 
         text = "\n\n".join(t for t in page_texts if t)
         logger.info("PaddleOCR finished, %d chars extracted", len(text))

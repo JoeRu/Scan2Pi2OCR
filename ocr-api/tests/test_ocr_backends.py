@@ -164,14 +164,11 @@ def test_paddleocr_run_returns_text(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     page.touch()
 
-    fake_result = [[
-        [[[0, 0], [10, 0], [10, 10], [0, 10]], ("Hello World", 0.99)],
-        [[[0, 12], [10, 12], [10, 22], [0, 22]], ("Second line", 0.95)],
-    ]]
+    fake_result = [{"rec_texts": ["Hello World", "Second line"], "rec_scores": [0.99, 0.95]}]
 
     with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
         mock_ocr_instance = MagicMock()
-        mock_ocr_instance.ocr.return_value = fake_result
+        mock_ocr_instance.predict.return_value = fake_result
         MockOCR.return_value = mock_ocr_instance
 
         backend = PaddleOcrBackend()
@@ -187,7 +184,7 @@ def test_paddleocr_run_handles_empty_result(tmp_path):
 
     with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
         mock_ocr_instance = MagicMock()
-        mock_ocr_instance.ocr.return_value = [[]]
+        mock_ocr_instance.predict.return_value = [{"rec_texts": [], "rec_scores": []}]
         MockOCR.return_value = mock_ocr_instance
 
         result = PaddleOcrBackend().run([page], "deu")

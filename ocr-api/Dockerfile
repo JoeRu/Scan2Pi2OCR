@@ -33,8 +33,8 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 # Adds ~600 MB to the image; remove this block if image size matters more than cold-start speed.
 RUN python3 -c "\
 from paddleocr import PaddleOCR; \
-PaddleOCR(lang='german', show_log=False); \
-PaddleOCR(lang='en', show_log=False)" || true
+PaddleOCR(lang='german'); \
+PaddleOCR(lang='en')" || true
 
 COPY app/ /ocr-api/app/
 

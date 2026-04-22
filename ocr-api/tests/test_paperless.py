@@ -134,11 +134,14 @@ async def test_deliver_paperless_with_ai_meta_passes_ids(tmp_path):
     )
     settings = _make_settings()
 
-    get_resp = MagicMock()
-    get_resp.raise_for_status = MagicMock()
-    get_resp.json = MagicMock(return_value={"results": [{"id": 7}]})
-
     captured = {}
+
+    async def mock_get(url, **kwargs):
+        name = kwargs.get("params", {}).get("name", "")
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value={"results": [{"id": 7, "name": name}]})
+        return resp
 
     def fake_post_sync(self, url, **kwargs):
         captured["files"] = kwargs.get("files", [])
@@ -146,7 +149,7 @@ async def test_deliver_paperless_with_ai_meta_passes_ids(tmp_path):
 
     with patch("app.outputs.paperless.get_settings", return_value=settings), \
          patch("app.outputs.paperless.asyncio.to_thread", side_effect=_fake_to_thread), \
-         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=get_resp), \
+         patch("httpx.AsyncClient.get", side_effect=mock_get), \
          patch("httpx.Client.post", fake_post_sync):
         result = await deliver_paperless(str(pdf), "invoice", ai_meta=ai_meta)
 
@@ -222,7 +225,7 @@ async def test_lookup_or_create_returns_existing_id():
     client = MagicMock()
     get_resp = MagicMock()
     get_resp.raise_for_status = MagicMock()
-    get_resp.json = MagicMock(return_value={"results": [{"id": 99}]})
+    get_resp.json = MagicMock(return_value={"results": [{"id": 99, "name": "Acme"}]})
     client.get = AsyncMock(return_value=get_resp)
 
     result = await _lookup_or_create(client, "https://pl.example.com", "correspondents", "Acme", {})
