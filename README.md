@@ -131,7 +131,7 @@ The engine is selected at startup via `OCR_ENGINE`. All backends produce a **sea
 | Engine | Value | Notes |
 |--------|-------|-------|
 | **Tesseract** | `tesseract` | Default. Uses `OCR_LANGUAGE` as-is (e.g. `deu+eng+frk`). |
-| **PaddleOCR** | `paddleocr` | Language codes are mapped automatically (`deu`/`frk` → `german`, `eng` → `en`). |
+| **PaddleOCR** | `paddleocr` | **Not recommended — do not use in production.** PaddleOCR 3.x allocates ~43 GB RAM during inference on CPU (confirmed OOM kill on first real scan). Root cause unknown; likely a model-loading regression in v3. Tracked in [PaddleOCR issue #17955](https://github.com/PaddlePaddle/PaddleOCR/issues/17955). The backend code is correct and will work once upstream fixes the memory issue. |
 | **Google Cloud Vision** | `gcv` | Not yet implemented — raises an error at runtime. Placeholder for future use. |
 
 ### AI metadata extraction (optional)
