@@ -120,8 +120,19 @@ Enable one or more simultaneously:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `OCR_LANGUAGE` | `deu+eng+frk` | Tesseract language codes (`+`-separated) |
+| `OCR_ENGINE` | `tesseract` | OCR backend: `tesseract` (default), `paddleocr`, or `gcv` (stub) |
+| `OCR_LANGUAGE` | `deu+eng+frk` | Language code(s) — format depends on engine (see below) |
 | `TRASH_TMP_FILES` | `true` | Delete tmp files after job completes |
+
+#### OCR backends
+
+The engine is selected at startup via `OCR_ENGINE`. All backends produce a **searchable PDF** — scanned pages are embedded as images with an invisible text overlay so Ctrl+F and copy-paste work.
+
+| Engine | Value | Notes |
+|--------|-------|-------|
+| **Tesseract** | `tesseract` | Default. Uses `OCR_LANGUAGE` as-is (e.g. `deu+eng+frk`). |
+| **PaddleOCR** | `paddleocr` | Language codes are mapped automatically (`deu`/`frk` → `german`, `eng` → `en`). |
+| **Google Cloud Vision** | `gcv` | Not yet implemented — raises an error at runtime. Placeholder for future use. |
 
 ### AI metadata extraction (optional)
 
