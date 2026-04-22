@@ -76,7 +76,11 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp
                             job_id, ai_meta.dokumenttyp, ai_meta.korrespondent, ai_meta.filename_stem)
                 file_name = ai_meta.filename_stem
             else:
-                logger.warning("[%s] AI metadata unavailable, using original filename", job_id)
+                file_name = scan_timestamp.strftime("%Y%m%d-%H%M")
+                logger.warning("[%s] AI metadata unavailable, falling back to timestamp filename: %s", job_id, file_name)
+        else:
+            file_name = scan_timestamp.strftime("%Y%m%d-%H%M")
+            logger.info("[%s] AI metadata disabled, using timestamp filename: %s", job_id, file_name)
 
         tasks = []
         task_names = []

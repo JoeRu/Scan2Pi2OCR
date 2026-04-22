@@ -209,8 +209,8 @@ async def test_process_job_ai_metadata_renames_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_process_job_ai_metadata_fallback_on_none(tmp_path):
-    """When AI metadata returns None, original file_name is used as fallback."""
+async def test_process_job_ai_metadata_fallback_uses_timestamp(tmp_path):
+    """When AI metadata returns None, filename falls back to YYYYMMDD-HHMM timestamp."""
     settings = _make_settings(
         enable_ai_metadata=True,
         enable_filesystem=True,
@@ -218,16 +218,35 @@ async def test_process_job_ai_metadata_fallback_on_none(tmp_path):
     )
     ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt")}
     fs_result = {"filesystem": {"status": "ok"}}
+    ts = datetime(2024, 3, 15, 9, 5, 42, tzinfo=timezone.utc)
 
     with patch("app.worker.get_settings", return_value=settings), \
          patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
          patch("app.worker.extract_ai_metadata", new_callable=AsyncMock, return_value=None), \
          patch("app.worker.deliver_filesystem", new_callable=AsyncMock, return_value=fs_result) as mock_fs, \
          patch("shutil.rmtree"):
-        await _process_job("j6", str(tmp_path), "scan_original", _now())
+        await _process_job("j6", str(tmp_path), "scan_original", ts)
 
     called_name = mock_fs.call_args[0][1]
-    assert called_name == "scan_original"
+    assert called_name == "20240315-0905"
+
+
+@pytest.mark.asyncio
+async def test_process_job_ai_disabled_uses_timestamp(tmp_path):
+    """When AI metadata is disabled, filename is YYYYMMDD-HHMM rather than the scan name."""
+    settings = _make_settings(enable_filesystem=True)
+    ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt")}
+    fs_result = {"filesystem": {"status": "ok"}}
+    ts = datetime(2024, 6, 1, 14, 30, 0, tzinfo=timezone.utc)
+
+    with patch("app.worker.get_settings", return_value=settings), \
+         patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
+         patch("app.worker.deliver_filesystem", new_callable=AsyncMock, return_value=fs_result) as mock_fs, \
+         patch("shutil.rmtree"):
+        await _process_job("j-ts", str(tmp_path), "scan_001", ts)
+
+    called_name = mock_fs.call_args[0][1]
+    assert called_name == "20240601-1430"
 
 
 @pytest.mark.asyncio
