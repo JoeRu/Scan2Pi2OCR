@@ -29,12 +29,22 @@ WORKDIR /ocr-api
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Pre-download PaddleOCR models so first-run latency is avoided.
-# Adds ~600 MB to the image; remove this block if image size matters more than cold-start speed.
+# Warm up PaddleOCR: run a real inference on a tiny blank image so all models are
+# downloaded from HuggingFace and JIT-compiled into the image layer.
+# PaddleOCR 3.x defers model downloads and kernel compilation to the first predict()
+# call, so merely instantiating PaddleOCR() is not enough.
+# Adds ~600 MB to the image; remove if image size matters more than cold-start speed.
 RUN python3 -c "\
+import tempfile, pathlib; \
+from PIL import Image; \
 from paddleocr import PaddleOCR; \
-PaddleOCR(lang='german'); \
-PaddleOCR(lang='en')" || true
+d = tempfile.mkdtemp(); \
+p = pathlib.Path(d) / 'w.png'; \
+Image.new('RGB', (8, 8), (255, 255, 255)).save(str(p)); \
+[PaddleOCR(lang=l, enable_mkldnn=False).predict(str(p)) for l in ('german', 'en')]; \
+print('PaddleOCR warmup done') \
+" || true
+
 
 COPY app/ /ocr-api/app/
 
