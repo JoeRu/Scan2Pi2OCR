@@ -89,6 +89,7 @@ def test_build_searchable_pdf_multi_page(tmp_path):
 
 from unittest.mock import patch, MagicMock
 from app.ocr_backends.tesseract import TesseractBackend
+from app.config import Settings
 
 
 def test_tesseract_run_returns_text(tmp_path):
@@ -171,7 +172,10 @@ def test_paddleocr_run_returns_text(tmp_path):
 
     fake_result = [{"rec_texts": ["Hello World", "Second line"], "rec_scores": [0.99, 0.95]}]
 
-    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
+    with (
+        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
+        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
+    ):
         mock_ocr_instance = MagicMock()
         mock_ocr_instance.predict.return_value = fake_result
         MockOCR.return_value = mock_ocr_instance
@@ -183,11 +187,34 @@ def test_paddleocr_run_returns_text(tmp_path):
     assert "Second line" in result
 
 
+def test_paddleocr_run_passes_det_limit_kwargs(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_tif(page)
+
+    fake_result = [{"rec_texts": ["x"], "rec_scores": [0.9]}]
+    with (
+        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
+        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
+    ):
+        mock_ocr_instance = MagicMock()
+        mock_ocr_instance.predict.return_value = fake_result
+        MockOCR.return_value = mock_ocr_instance
+
+        PaddleOcrBackend().run([page], "deu")
+
+    _, kwargs = mock_ocr_instance.predict.call_args
+    assert kwargs["text_det_limit_type"] == "max"
+    assert kwargs["text_det_limit_side_len"] == 1600
+
+
 def test_paddleocr_run_handles_empty_result(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     _make_tif(page)
 
-    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR:
+    with (
+        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
+        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
+    ):
         mock_ocr_instance = MagicMock()
         mock_ocr_instance.predict.return_value = [{"rec_texts": [], "rec_scores": []}]
         MockOCR.return_value = mock_ocr_instance

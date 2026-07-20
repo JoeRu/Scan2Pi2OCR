@@ -3,6 +3,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from app.config import get_settings
+
 logger = logging.getLogger("app.ocr_backends.paddleocr")
 
 _PADDLE_SUPPORTED = {".jpg", ".jpeg", ".png", ".bmp", ".pdf"}
@@ -24,6 +26,7 @@ class PaddleOcrBackend:
         if not pages:
             raise ValueError("No pages provided to PaddleOcrBackend")
 
+        settings = get_settings()
         lang = self._map_language(language)
         logger.info("Running PaddleOCR on %d page(s), mapped language=%s", len(pages), lang)
         # enable_mkldnn=False: oneDNN triggers a NotImplementedError on some CPUs with PaddlePaddle 3.x
@@ -33,7 +36,12 @@ class PaddleOcrBackend:
         for page in pages:
             png_path, converted = self._to_png_if_needed(page)
             try:
-                results = ocr.predict(str(png_path), use_textline_orientation=True)
+                results = ocr.predict(
+                    str(png_path),
+                    use_textline_orientation=True,
+                    text_det_limit_type=settings.paddle_det_limit_type,
+                    text_det_limit_side_len=settings.paddle_det_limit_side_len,
+                )
                 if not results:
                     page_texts.append("")
                     continue

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     ocr_language: str = "deu+eng+frk"
     ocr_engine: Literal["tesseract", "paddleocr", "gcv"] = "tesseract"
+    paddle_det_limit_type: Literal["max", "min"] = "max"
+    paddle_det_limit_side_len: int = 1600
     trash_tmp_files: bool = True
 
     enable_ai_metadata: bool = False

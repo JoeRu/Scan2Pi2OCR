@@ -60,7 +60,7 @@ GET /scan/status/{job_id}
 
 - `base.py` — `OcrBackend` Protocol: `run(pages: list[Path], language: str) -> str`
 - `tesseract.py` — wraps Tesseract CLI subprocess, reads `_ocr_out.txt`
-- `paddleocr.py` — PaddleOCR Python API (lazy import; `try/except ImportError` at module level for mockability)
+- `paddleocr.py` — PaddleOCR Python API (lazy import; `try/except ImportError` at module level for mockability). PaddleOCR's detector is capped via `PADDLE_DET_LIMIT_TYPE` (default `max`) and `PADDLE_DET_LIMIT_SIDE_LEN` (default `1600`); without the cap a 300 dpi A4 scan OOM-kills the process (PaddleOCR#17955).
 - `gcv.py` — Google Cloud Vision stub (raises `NotImplementedError`)
 - `build_pdf.py` — `build_searchable_pdf()` creates PDFs via `fpdf2`: TIF images as pages + invisible white text layer for Ctrl+F searchability
 - `__init__.py` — `get_backend(engine: str)` factory with lazy per-branch imports
