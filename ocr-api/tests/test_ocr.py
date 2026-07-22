@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from PIL import Image
 from app.config import Settings
+from app.ocr_backends.types import OcrLine, OcrPage
 
 import pytest
 from app.ocr import is_blank_page
@@ -41,21 +42,25 @@ def test_process_scan_uses_backend(tmp_path):
     _make_tif(tif)
 
     mock_backend = MagicMock()
-    mock_backend.run.return_value = "extracted text"
+    mock_backend.run.return_value = [OcrPage([OcrLine("extracted text", 0, 0, 10, 5)])]
+
+    captured = {}
+
+    def fake_pdf(pages, pages_ocr, path):
+        captured["pages_ocr"] = pages_ocr
+        path.write_bytes(b"%PDF-1.4")
 
     with patch("app.ocr.get_settings", return_value=_settings_with_engine("tesseract")), \
          patch("app.ocr.get_backend", return_value=mock_backend), \
-         patch("app.ocr.build_searchable_pdf") as mock_pdf, \
+         patch("app.ocr.build_searchable_pdf", side_effect=fake_pdf), \
          patch("app.ocr.remove_blank_pages"), \
          patch("app.ocr.clean_page"):
-
-        mock_pdf.side_effect = lambda pages, text, path: path.write_bytes(b"%PDF-1.4")
 
         result = asyncio.run(_process_scan(str(tmp_path), "output"))
 
     assert result["pdf"].endswith("output.pdf")
-    assert result["txt"].endswith("output.txt")
     assert Path(result["txt"]).read_text() == "extracted text"
+    assert captured["pages_ocr"] == mock_backend.run.return_value
     mock_backend.run.assert_called_once()
 
 
