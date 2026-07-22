@@ -251,3 +251,15 @@ def test_gcv_stub_raises_not_implemented(tmp_path):
 def test_gcv_stub_raises_on_empty_pages():
     with pytest.raises((ValueError, NotImplementedError)):
         GoogleCloudVisionBackend().run([], "deu")
+
+
+from app.ocr_backends.types import OcrLine, OcrPage
+
+
+def test_ocrpage_text_joins_lines_with_newline():
+    page = OcrPage([OcrLine("first", 0, 0, 10, 5), OcrLine("second", 0, 6, 10, 11)])
+    assert page.text == "first\nsecond"
+
+
+def test_ocrpage_empty_text_is_empty_string():
+    assert OcrPage([]).text == ""
