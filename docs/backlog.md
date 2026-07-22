@@ -39,3 +39,20 @@ adopt ocrmypdf wholesale (replaces the fpdf2 text-layer approach) or bolt on
 a Ghostscript PDF/A pass after `build_searchable_pdf()`.
 
 **Value:** Medium — nice for archival/compliance; no functional loss today.
+
+## Switch PaddleOCR to the lightweight (mobile) detection model
+
+**Problem:** Even with the detection cap at `PADDLE_DET_LIMIT_SIDE_LEN=960`,
+PaddleOCR runs ~2 min/page on CPU — too slow for routine use. The bottleneck is
+the default **server** detection model (`PP-OCRv5_server_det`), which is heavy
+on CPU.
+
+**Direction:** Pin the lightweight mobile detector (e.g.
+`PP-OCRv5_mobile_det`) in the `PaddleOCR(...)` constructor in
+`ocr-api/app/ocr_backends/paddleocr.py`. Usually much faster on CPU with only a
+small accuracy hit on clean documents. Requires baking the mobile model into
+the Docker warmup layer (rebuild) so first-run download doesn't block scans.
+Consider making the model name configurable via a Settings/env var.
+
+**Value:** High — directly addresses the ~2 min/page wall-clock that currently
+makes PaddleOCR impractical as the default engine.
