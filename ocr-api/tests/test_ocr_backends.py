@@ -62,7 +62,7 @@ def test_build_searchable_pdf_text_in_content(tmp_path):
     _make_minimal_tif(page)
     out = tmp_path / "out.pdf"
     build_searchable_pdf([page], [_page(("searchable", 1, 1, 8, 4))], out)
-    assert b"searchable" in out.read_bytes()
+    assert "searchable" in _extract_pdf_text(out)
 
 
 def test_build_searchable_pdf_text_on_every_page(tmp_path):
@@ -74,10 +74,10 @@ def test_build_searchable_pdf_text_on_every_page(tmp_path):
     ocr = [_page((f"pagetext{i}", 10, 10, 120, 30)) for i in range(3)]
     out = tmp_path / "out.pdf"
     build_searchable_pdf(pages, ocr, out)
-    raw = out.read_bytes()
+    text = _extract_pdf_text(out)
     for i in range(3):
-        assert f"pagetext{i}".encode() in raw       # text present on each page
-    content = raw.decode("latin-1")
+        assert f"pagetext{i}" in text                # text present on each page
+    content = out.read_bytes().decode("latin-1")
     assert content.count("/Page\n") >= 3 or "/Count 3" in content
 
 
@@ -87,6 +87,33 @@ def test_build_searchable_pdf_empty_page_ok(tmp_path):
     out = tmp_path / "out.pdf"
     build_searchable_pdf([page], [OcrPage([])], out)   # no lines -> image-only page
     assert out.exists() and out.stat().st_size > 0
+
+
+def _extract_pdf_text(path) -> str:
+    from pypdf import PdfReader
+    return "\n".join(p.extract_text() for p in PdfReader(str(path)).pages)
+
+
+def test_build_searchable_pdf_handles_non_latin1_text(tmp_path):
+    # Bullet, euro, en-dash: all outside latin-1. Core fonts raise on these;
+    # the text layer must embed a Unicode font so real scans don't crash.
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    build_searchable_pdf([page], [_page(("• Gesamt: 1.201,90 € – ok", 10, 10, 200, 30))], out)
+    text = _extract_pdf_text(out)
+    assert "€" in text and "•" in text
+
+
+def test_build_searchable_pdf_falls_back_without_unicode_font(tmp_path):
+    # If no Unicode font is available, degrade to latin-1 (lossy) instead of crashing.
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    with patch("app.ocr_backends.build_pdf._find_unicode_font", return_value=None):
+        build_searchable_pdf([page], [_page(("Gesamt 1201 EUR • x", 10, 10, 200, 30))], out)
+    assert out.exists() and out.stat().st_size > 0
+    assert "Gesamt 1201 EUR" in _extract_pdf_text(out)
 
 
 from unittest.mock import patch, MagicMock
