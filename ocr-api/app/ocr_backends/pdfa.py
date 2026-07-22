@@ -48,7 +48,6 @@ def convert_to_pdfa(pdf_path: Path) -> None:
     tmp_dir = pdf_path.parent
     def_ps = tmp_dir / f"{pdf_path.stem}_pdfa_def.ps"
     out_pdf = tmp_dir / f"{pdf_path.stem}_pdfa.pdf"
-    def_ps.write_text(_PDFA_DEF_TEMPLATE.format(icc=icc))
 
     cmd = [
         "gs", "-dPDFA=2", "-dBATCH", "-dNOPAUSE", "-dNOOUTERSAVE",
@@ -57,6 +56,7 @@ def convert_to_pdfa(pdf_path: Path) -> None:
         f"-sOutputFile={out_pdf}", str(def_ps), str(pdf_path),
     ]
     try:
+        def_ps.write_text(_PDFA_DEF_TEMPLATE.format(icc=icc))
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and out_pdf.exists() and out_pdf.stat().st_size > 0:
             os.replace(str(out_pdf), str(pdf_path))
