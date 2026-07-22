@@ -166,62 +166,55 @@ def test_get_backend_gcv_returns_backend():
 from app.ocr_backends.paddleocr import PaddleOcrBackend
 
 
-def test_paddleocr_run_returns_text(tmp_path):
+def test_paddleocr_run_returns_pages_with_boxes(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     _make_tif(page)
+    fake_result = [{
+        "rec_texts": ["Hello World", "Second line"],
+        "rec_boxes": [[10, 20, 100, 40], [10, 50, 120, 70]],
+        "rec_scores": [0.99, 0.95],
+    }]
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR, \
+         patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")):
+        inst = MagicMock()
+        inst.predict.return_value = fake_result
+        MockOCR.return_value = inst
+        pages = PaddleOcrBackend().run([page], "deu+eng")
 
-    fake_result = [{"rec_texts": ["Hello World", "Second line"], "rec_scores": [0.99, 0.95]}]
-
-    with (
-        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
-        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
-    ):
-        mock_ocr_instance = MagicMock()
-        mock_ocr_instance.predict.return_value = fake_result
-        MockOCR.return_value = mock_ocr_instance
-
-        backend = PaddleOcrBackend()
-        result = backend.run([page], "deu+eng")
-
-    assert "Hello World" in result
-    assert "Second line" in result
-
-
-def test_paddleocr_run_passes_det_limit_kwargs(tmp_path):
-    page = tmp_path / "scan_0001.pnm.tif"
-    _make_tif(page)
-
-    fake_result = [{"rec_texts": ["x"], "rec_scores": [0.9]}]
-    with (
-        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
-        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
-    ):
-        mock_ocr_instance = MagicMock()
-        mock_ocr_instance.predict.return_value = fake_result
-        MockOCR.return_value = mock_ocr_instance
-
-        PaddleOcrBackend().run([page], "deu")
-
-    _, kwargs = mock_ocr_instance.predict.call_args
-    assert kwargs["text_det_limit_type"] == "max"
-    assert kwargs["text_det_limit_side_len"] == 1600
+    assert len(pages) == 1
+    assert [l.text for l in pages[0].lines] == ["Hello World", "Second line"]
+    first = pages[0].lines[0]
+    assert (first.x0, first.y0, first.x1, first.y1) == (10, 20, 100, 40)
 
 
 def test_paddleocr_run_handles_empty_result(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     _make_tif(page)
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR, \
+         patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")):
+        inst = MagicMock()
+        inst.predict.return_value = [{"rec_texts": [], "rec_boxes": None, "rec_scores": []}]
+        MockOCR.return_value = inst
+        pages = PaddleOcrBackend().run([page], "deu")
 
-    with (
-        patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")),
-        patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR,
-    ):
-        mock_ocr_instance = MagicMock()
-        mock_ocr_instance.predict.return_value = [{"rec_texts": [], "rec_scores": []}]
-        MockOCR.return_value = mock_ocr_instance
+    assert len(pages) == 1
+    assert pages[0].lines == []
 
-        result = PaddleOcrBackend().run([page], "deu")
 
-    assert result == ""
+def test_paddleocr_run_passes_det_limit_kwargs(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_tif(page)
+    fake_result = [{"rec_texts": ["x"], "rec_boxes": [[0, 0, 5, 5]], "rec_scores": [0.9]}]
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR, \
+         patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")):
+        inst = MagicMock()
+        inst.predict.return_value = fake_result
+        MockOCR.return_value = inst
+        PaddleOcrBackend().run([page], "deu")
+
+    _, kwargs = inst.predict.call_args
+    assert kwargs["text_det_limit_type"] == "max"
+    assert kwargs["text_det_limit_side_len"] == 1600
 
 
 def test_paddleocr_language_mapping():
