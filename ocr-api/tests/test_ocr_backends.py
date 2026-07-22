@@ -28,6 +28,7 @@ def test_ocr_backend_protocol_is_checkable():
 
 from pathlib import Path as _Path
 from app.ocr_backends.build_pdf import build_searchable_pdf
+from app.ocr_backends.types import OcrLine, OcrPage
 
 
 def _make_minimal_tif(path: _Path) -> None:
@@ -37,26 +38,6 @@ def _make_minimal_tif(path: _Path) -> None:
     img.save(str(path), dpi=(300, 300))
 
 
-def test_build_searchable_pdf_creates_file(tmp_path):
-    page = tmp_path / "scan_0001.pnm.tif"
-    _make_minimal_tif(page)
-    out = tmp_path / "out.pdf"
-    build_searchable_pdf([page], "hello world", out)
-    assert out.exists()
-    assert out.stat().st_size > 0
-
-
-def test_build_searchable_pdf_text_in_content(tmp_path):
-    page = tmp_path / "scan_0001.pnm.tif"
-    _make_minimal_tif(page)
-    out = tmp_path / "out.pdf"
-    build_searchable_pdf([page], "searchable text here", out)
-    raw = out.read_bytes()
-    # PDF content streams may be compressed; check the uncompressed raw bytes
-    # for our text OR check that the PDF contains the text in a readable form
-    assert b"searchable" in raw
-
-
 def _make_realistic_tif(path: _Path) -> None:
     """248×350 px at 300 DPI ≈ 21×29.7 mm (A4 proxy)."""
     from PIL import Image
@@ -64,27 +45,48 @@ def _make_realistic_tif(path: _Path) -> None:
     img.save(str(path), dpi=(300, 300))
 
 
-def test_build_searchable_pdf_realistic_page(tmp_path):
+def _page(*lines):
+    return OcrPage([OcrLine(t, x0, y0, x1, y1) for (t, x0, y0, x1, y1) in lines])
+
+
+def test_build_searchable_pdf_creates_file(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
-    _make_realistic_tif(page)
+    _make_minimal_tif(page)
     out = tmp_path / "out.pdf"
-    build_searchable_pdf([page], "realistic page text", out)
-    raw = out.read_bytes()
-    assert out.stat().st_size > 0
-    assert b"realistic" in raw
+    build_searchable_pdf([page], [_page(("hello world", 1, 1, 8, 4))], out)
+    assert out.exists() and out.stat().st_size > 0
 
 
-def test_build_searchable_pdf_multi_page(tmp_path):
+def test_build_searchable_pdf_text_in_content(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_minimal_tif(page)
+    out = tmp_path / "out.pdf"
+    build_searchable_pdf([page], [_page(("searchable", 1, 1, 8, 4))], out)
+    assert b"searchable" in out.read_bytes()
+
+
+def test_build_searchable_pdf_text_on_every_page(tmp_path):
     pages = []
     for i in range(3):
         p = tmp_path / f"scan_{i:04d}.pnm.tif"
-        _make_minimal_tif(p)
+        _make_realistic_tif(p)
         pages.append(p)
+    ocr = [_page((f"pagetext{i}", 10, 10, 120, 30)) for i in range(3)]
     out = tmp_path / "out.pdf"
-    build_searchable_pdf(pages, "multi page text", out)
-    content = out.read_bytes().decode("latin-1")
-    # PDF should declare 3 pages
+    build_searchable_pdf(pages, ocr, out)
+    raw = out.read_bytes()
+    for i in range(3):
+        assert f"pagetext{i}".encode() in raw       # text present on each page
+    content = raw.decode("latin-1")
     assert content.count("/Page\n") >= 3 or "/Count 3" in content
+
+
+def test_build_searchable_pdf_empty_page_ok(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_minimal_tif(page)
+    out = tmp_path / "out.pdf"
+    build_searchable_pdf([page], [OcrPage([])], out)   # no lines -> image-only page
+    assert out.exists() and out.stat().st_size > 0
 
 
 from unittest.mock import patch, MagicMock
