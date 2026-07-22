@@ -53,6 +53,7 @@ def test_process_scan_uses_backend(tmp_path):
     with patch("app.ocr.get_settings", return_value=_settings_with_engine("tesseract")), \
          patch("app.ocr.get_backend", return_value=mock_backend), \
          patch("app.ocr.build_searchable_pdf", side_effect=fake_pdf), \
+         patch("app.ocr.convert_to_pdfa") as mock_pdfa, \
          patch("app.ocr.remove_blank_pages"), \
          patch("app.ocr.clean_page"):
 
@@ -61,6 +62,8 @@ def test_process_scan_uses_backend(tmp_path):
     assert result["pdf"].endswith("output.pdf")
     assert Path(result["txt"]).read_text() == "extracted text"
     assert captured["pages_ocr"] == mock_backend.run.return_value
+    mock_pdfa.assert_called_once()
+    assert str(mock_pdfa.call_args.args[0]).endswith("output.pdf")
     mock_backend.run.assert_called_once()
 
 
