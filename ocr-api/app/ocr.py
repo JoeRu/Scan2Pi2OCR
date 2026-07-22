@@ -89,19 +89,20 @@ async def process_scan(tmp_dir: str, file_name: str) -> dict:
 
     logger.info("Step 3/3: OCR (%s)", settings.ocr_engine)
     backend = get_backend(settings.ocr_engine)
-    text = await loop.run_in_executor(
+    pages_ocr = await loop.run_in_executor(
         None,
         functools.partial(backend.run, pages, settings.ocr_language),
     )
+    flat_text = "\n\n".join(page.text for page in pages_ocr)
 
     pdf_path = Path(tmp_dir) / f"{file_name}.pdf"
     txt_path = Path(tmp_dir) / f"{file_name}.txt"
 
     await loop.run_in_executor(
         None,
-        functools.partial(build_searchable_pdf, pages, text, pdf_path),
+        functools.partial(build_searchable_pdf, pages, pages_ocr, pdf_path),
     )
-    txt_path.write_text(text)
+    txt_path.write_text(flat_text)
 
     logger.info("OCR pipeline done: %s.{pdf,txt}", file_name)
     return {

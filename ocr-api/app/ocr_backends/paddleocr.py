@@ -4,6 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.config import get_settings
+from app.ocr_backends.types import OcrLine, OcrPage
 
 logger = logging.getLogger("app.ocr_backends.paddleocr")
 
@@ -22,17 +23,17 @@ _LANGUAGE_MAP = {
 
 
 class PaddleOcrBackend:
-    def run(self, pages: list[Path], language: str) -> str:
+    def run(self, pages: list[Path], language: str) -> list[OcrPage]:
         if not pages:
             raise ValueError("No pages provided to PaddleOcrBackend")
 
-        settings = get_settings()
         lang = self._map_language(language)
         logger.info("Running PaddleOCR on %d page(s), mapped language=%s", len(pages), lang)
+        settings = get_settings()
         # enable_mkldnn=False: oneDNN triggers a NotImplementedError on some CPUs with PaddlePaddle 3.x
         ocr = PaddleOCR(lang=lang, enable_mkldnn=False)
 
-        page_texts: list[str] = []
+        result_pages: list[OcrPage] = []
         for page in pages:
             png_path, converted = self._to_png_if_needed(page)
             try:
@@ -42,18 +43,29 @@ class PaddleOcrBackend:
                     text_det_limit_type=settings.paddle_det_limit_type,
                     text_det_limit_side_len=settings.paddle_det_limit_side_len,
                 )
-                if not results:
-                    page_texts.append("")
-                    continue
-                rec_texts: list[str] = results[0].get("rec_texts") or []
-                page_texts.append("\n".join(rec_texts))
+                result_pages.append(self._to_ocr_page(results))
             finally:
                 if converted:
                     png_path.unlink(missing_ok=True)
 
-        text = "\n\n".join(t for t in page_texts if t)
-        logger.info("PaddleOCR finished, %d chars extracted", len(text))
-        return text
+        total = sum(len(p.lines) for p in result_pages)
+        logger.info("PaddleOCR finished, %d line(s) across %d page(s)", total, len(result_pages))
+        return result_pages
+
+    @staticmethod
+    def _to_ocr_page(results) -> OcrPage:
+        if not results:
+            return OcrPage([])
+        data = results[0]
+        rec_texts = data.get("rec_texts") or []
+        rec_boxes = data.get("rec_boxes")
+        if rec_boxes is None:
+            return OcrPage([])
+        lines = [
+            OcrLine(text=text, x0=int(box[0]), y0=int(box[1]), x1=int(box[2]), y1=int(box[3]))
+            for text, box in zip(rec_texts, rec_boxes)
+        ]
+        return OcrPage(lines)
 
     def _to_png_if_needed(self, page: Path) -> tuple[Path, bool]:
         """Convert to PNG if the format isn't natively supported by PaddleOCR."""

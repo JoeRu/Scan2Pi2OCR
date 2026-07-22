@@ -2,18 +2,16 @@ import logging
 from pathlib import Path
 
 from fpdf import FPDF
-from fpdf.errors import FPDFException
+from fpdf.enums import TextMode
 from PIL import Image
+
+from app.ocr_backends.types import OcrPage
 
 logger = logging.getLogger("app.ocr_backends.build_pdf")
 
 
-def _pdf_escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-
-def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> None:
-    """Create a searchable PDF from TIF page images with an invisible text layer."""
+def build_searchable_pdf(pages: list[Path], pages_ocr: list[OcrPage], output_path: Path) -> None:
+    """Create a searchable PDF: each page image plus an invisible, positioned text layer."""
     if not pages:
         raise ValueError("pages must not be empty")
 
@@ -22,6 +20,8 @@ def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> Non
     pdf.set_compression(False)
 
     for i, page_path in enumerate(pages):
+        ocr_page = pages_ocr[i] if i < len(pages_ocr) else OcrPage([])
+
         with Image.open(page_path) as img:
             dpi = img.info.get("dpi", (300, 300))
             w_px, h_px = img.size
@@ -33,22 +33,18 @@ def build_searchable_pdf(pages: list[Path], text: str, output_path: Path) -> Non
         pdf.add_page(format=(w_mm, h_mm))
         pdf.image(str(page_path), x=0, y=0, w=w_mm, h=h_mm)
 
-        # All extracted text goes on page 1 only — per-page placement requires
-        # OcrBackend to return per-page strings, which is a future enhancement.
-        if i == 0 and text:
-            # Invisible white text layer — searchable but not visible
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_font("Helvetica", size=1)
-            # Use absolute coordinates outside the tiny image bounds if needed
-            pdf.set_xy(0, 0)
-            try:
-                pdf.multi_cell(w=w_mm, h=1, text=text)
-            except FPDFException:
-                # Page may be too small for multi_cell wrapping;
-                # write text directly into the page content bytearray
-                raw_op = f"BT /F1 1 Tf 0 0 Td ({_pdf_escape(text)}) Tj ET\n".encode("latin-1", errors="replace")
-                pdf.pages[pdf.page].contents.extend(raw_op)
-            pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica")
+        with pdf.local_context(text_mode=TextMode.INVISIBLE):
+            for line in ocr_page.lines:
+                if not line.text:
+                    continue
+                line_h_px = line.y1 - line.y0
+                if line_h_px <= 0:
+                    continue
+                pdf.set_font_size(max(line_h_px / dpi_y * 72, 1))
+                x_mm = line.x0 / dpi_x * 25.4
+                baseline_mm = (line.y0 + 0.8 * line_h_px) / dpi_y * 25.4
+                pdf.text(x_mm, baseline_mm, line.text)
 
     pdf.output(str(output_path))
     logger.info("Searchable PDF written: %s (%d page(s))", output_path.name, len(pages))
