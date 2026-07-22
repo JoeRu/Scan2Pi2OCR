@@ -9,6 +9,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.ocr_backends import get_backend
 from app.ocr_backends.build_pdf import build_searchable_pdf
+from app.ocr_backends.pdfa import convert_to_pdfa
 
 logger = logging.getLogger("app.ocr")
 
@@ -102,6 +103,7 @@ async def process_scan(tmp_dir: str, file_name: str) -> dict:
         None,
         functools.partial(build_searchable_pdf, pages, pages_ocr, pdf_path),
     )
+    await loop.run_in_executor(None, convert_to_pdfa, pdf_path)
     txt_path.write_text(flat_text)
 
     logger.info("OCR pipeline done: %s.{pdf,txt}", file_name)

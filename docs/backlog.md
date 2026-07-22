@@ -20,26 +20,6 @@ This is the "known limitation" noted in CLAUDE.md.
 
 **Value:** Higher — fixes real searchability loss on every multi-page scan.
 
-## PDF/A output
-
-**Problem:** Output is plain PDF-1.3, not PDF/A (archival). Verified missing:
-`/OutputIntent` (ICC profile), XMP `/Metadata`, and embedded fonts
-(`/BaseFont /Helvetica` is referenced by name, which PDF/A forbids).
-Note: this is independent of searchability — the current PDF *is* searchable;
-it just isn't archival-compliant.
-
-**Direction:** `fpdf2` can't emit PDF/A directly (no font embedding /
-OutputIntent / XMP support). Cleanest path is a post-process conversion step:
-- `ocrmypdf` — would also produce proper per-page text for free (could
-  subsume the per-page item above), or
-- Ghostscript `-dPDFA` convert as a final step in the pipeline.
-
-Adds a system dependency to the Docker image either way. Decide whether to
-adopt ocrmypdf wholesale (replaces the fpdf2 text-layer approach) or bolt on
-a Ghostscript PDF/A pass after `build_searchable_pdf()`.
-
-**Value:** Medium — nice for archival/compliance; no functional loss today.
-
 ## Switch PaddleOCR to the lightweight (mobile) detection model
 
 **Problem:** Even with the detection cap at `PADDLE_DET_LIMIT_SIDE_LEN=960`,
