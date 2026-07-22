@@ -92,39 +92,74 @@ from app.ocr_backends.tesseract import TesseractBackend
 from app.config import Settings
 
 
-def test_tesseract_run_returns_text(tmp_path):
+_TSV_HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"
+
+
+def _tsv_row(level, page, block, par, line, word, left, top, width, height, conf, text):
+    return "\t".join(str(v) for v in
+                     [level, page, block, par, line, word, left, top, width, height, conf, text])
+
+
+def test_tesseract_run_returns_pages_with_lines(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     page.touch()
-    expected_text = "Hallo Welt\n"
+    tsv = "\n".join([
+        _TSV_HEADER,
+        _tsv_row(5, 1, 1, 1, 1, 1, 10, 20, 40, 15, 96, "Hallo"),
+        _tsv_row(5, 1, 1, 1, 1, 2, 55, 20, 30, 15, 95, "Welt"),
+        _tsv_row(5, 1, 1, 1, 2, 1, 10, 50, 60, 15, 90, "Zeile2"),
+    ])
 
     def fake_run(cmd, capture_output, text, cwd):
-        # tesseract writes the output txt file as a side effect
-        (Path(cwd) / "_ocr_out.txt").write_text(expected_text)
+        (Path(cwd) / "_ocr_out.tsv").write_text(tsv)
         return MagicMock(returncode=0, stdout="", stderr="")
 
     with patch("app.ocr_backends.tesseract.subprocess.run", side_effect=fake_run):
-        backend = TesseractBackend()
-        result = backend.run([page], "deu+eng")
+        pages = TesseractBackend().run([page], "deu+eng")
 
-    assert result == expected_text
+    assert len(pages) == 1
+    assert [l.text for l in pages[0].lines] == ["Hallo Welt", "Zeile2"]
+    line0 = pages[0].lines[0]
+    # union of the two words' boxes: x0=10, y0=20, x1=55+30=85, y1=20+15=35
+    assert (line0.x0, line0.y0, line0.x1, line0.y1) == (10, 20, 85, 35)
 
 
-def test_tesseract_run_writes_scan_list(tmp_path):
-    page1 = tmp_path / "scan_0001.pnm.tif"
-    page2 = tmp_path / "scan_0002.pnm.tif"
-    page1.touch()
-    page2.touch()
+def test_tesseract_skips_low_conf_and_empty(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    page.touch()
+    tsv = "\n".join([
+        _TSV_HEADER,
+        _tsv_row(5, 1, 1, 1, 1, 1, 10, 20, 40, 15, -1, "ghost"),   # conf -1 dropped
+        _tsv_row(5, 1, 1, 1, 1, 2, 60, 20, 40, 15, 90, "  "),       # empty dropped
+        _tsv_row(4, 1, 1, 1, 1, 0, 0, 0, 0, 0, -1, ""),             # non-word level dropped
+        _tsv_row(5, 1, 1, 1, 1, 3, 110, 20, 40, 15, 88, "keep"),
+    ])
 
     def fake_run(cmd, capture_output, text, cwd):
-        (Path(cwd) / "_ocr_out.txt").write_text("text")
+        (Path(cwd) / "_ocr_out.tsv").write_text(tsv)
         return MagicMock(returncode=0, stdout="", stderr="")
 
     with patch("app.ocr_backends.tesseract.subprocess.run", side_effect=fake_run):
-        TesseractBackend().run([page1, page2], "deu")
+        pages = TesseractBackend().run([page], "deu")
 
-    scan_list = (tmp_path / "scan_list.txt").read_text()
-    assert "scan_0001.pnm.tif" in scan_list
-    assert "scan_0002.pnm.tif" in scan_list
+    assert [l.text for l in pages[0].lines] == ["keep"]
+
+
+def test_tesseract_returns_one_page_per_input_even_if_blank(tmp_path):
+    p1 = tmp_path / "scan_0001.pnm.tif"; p1.touch()
+    p2 = tmp_path / "scan_0002.pnm.tif"; p2.touch()
+    tsv = "\n".join([_TSV_HEADER, _tsv_row(5, 1, 1, 1, 1, 1, 10, 20, 40, 15, 96, "only")])
+
+    def fake_run(cmd, capture_output, text, cwd):
+        (Path(cwd) / "_ocr_out.tsv").write_text(tsv)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("app.ocr_backends.tesseract.subprocess.run", side_effect=fake_run):
+        pages = TesseractBackend().run([p1, p2], "deu")
+
+    assert len(pages) == 2
+    assert [l.text for l in pages[0].lines] == ["only"]
+    assert pages[1].lines == []
 
 
 def test_tesseract_run_raises_on_empty_pages():
