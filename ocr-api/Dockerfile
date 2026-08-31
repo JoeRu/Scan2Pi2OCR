@@ -31,6 +31,15 @@ WORKDIR /ocr-api
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
+# Create the runtime user and its home BEFORE the PaddleOCR warmup so the models
+# cache into the ocr user's HOME (/ocr-api/.paddlex) and are reachable at runtime.
+# Warming up as root leaves them under /root/.paddlex (mode 0700), unreadable by
+# the ocr user, which forces a fresh model download on the first real scan.
+RUN addgroup --system ocr && adduser --system --ingroup ocr --home /ocr-api ocr \
+    && mkdir -p /ocr-api/.config/msmtp /ocr-api/.config/rclone \
+    && chown -R ocr:ocr /ocr-api
+USER ocr
+
 # Warm up PaddleOCR: run a real inference on a tiny blank image so all models are
 # downloaded from HuggingFace and JIT-compiled into the image layer.
 # PaddleOCR 3.x defers model downloads and kernel compilation to the first predict()
@@ -48,12 +57,7 @@ print('PaddleOCR warmup done') \
 " || true
 
 
-COPY app/ /ocr-api/app/
-
-RUN addgroup --system ocr && adduser --system --ingroup ocr --home /ocr-api ocr \
-    && mkdir -p /ocr-api/.config/msmtp /ocr-api/.config/rclone \
-    && chown -R ocr:ocr /ocr-api
-USER ocr
+COPY --chown=ocr:ocr app/ /ocr-api/app/
 
 COPY --chown=ocr:ocr entrypoint.sh /ocr-api/entrypoint.sh
 RUN chmod +x /ocr-api/entrypoint.sh
