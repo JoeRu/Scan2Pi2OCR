@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     ocr_engine: Literal["tesseract", "paddleocr", "gcv"] = "tesseract"
     paddle_det_limit_type: Literal["max", "min"] = "max"
     paddle_det_limit_side_len: int = 1600
+    # Lightweight mobile detector: much faster on CPU than the default
+    # PP-OCRv5_server_det, small accuracy hit on clean docs. Recognition stays
+    # on the accurate server default. Must be baked into the Docker warmup layer.
+    paddle_text_det_model: str = "PP-OCRv5_mobile_det"
     trash_tmp_files: bool = True
 
     enable_ai_metadata: bool = False

@@ -265,6 +265,27 @@ def test_paddleocr_run_handles_empty_result(tmp_path):
     assert pages[0].lines == []
 
 
+def test_paddleocr_run_passes_det_model_name(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_tif(page)
+    fake_result = [{"rec_texts": ["x"], "rec_boxes": [[0, 0, 5, 5]], "rec_scores": [0.9]}]
+    with patch("app.ocr_backends.paddleocr.PaddleOCR") as MockOCR, \
+         patch("app.ocr_backends.paddleocr.get_settings", return_value=Settings(api_key="test")):
+        inst = MagicMock()
+        inst.predict.return_value = fake_result
+        MockOCR.return_value = inst
+        PaddleOcrBackend().run([page], "deu")
+
+    _, kwargs = MockOCR.call_args
+    # lightweight mobile detector baked into the image; server recognition untouched
+    assert kwargs["text_detection_model_name"] == "PP-OCRv5_mobile_det"
+    assert "text_recognition_model_name" not in kwargs
+
+
+def test_config_default_paddle_det_model_is_mobile():
+    assert Settings(api_key="test").paddle_text_det_model == "PP-OCRv5_mobile_det"
+
+
 def test_paddleocr_run_passes_det_limit_kwargs(tmp_path):
     page = tmp_path / "scan_0001.pnm.tif"
     _make_tif(page)

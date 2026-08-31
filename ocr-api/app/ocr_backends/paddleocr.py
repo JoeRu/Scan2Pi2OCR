@@ -31,7 +31,11 @@ class PaddleOcrBackend:
         logger.info("Running PaddleOCR on %d page(s), mapped language=%s", len(pages), lang)
         settings = get_settings()
         # enable_mkldnn=False: oneDNN triggers a NotImplementedError on some CPUs with PaddlePaddle 3.x
-        ocr = PaddleOCR(lang=lang, enable_mkldnn=False)
+        ocr = PaddleOCR(
+            lang=lang,
+            enable_mkldnn=False,
+            text_detection_model_name=settings.paddle_text_det_model,
+        )
 
         result_pages: list[OcrPage] = []
         for page in pages:

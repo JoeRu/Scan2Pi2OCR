@@ -52,7 +52,7 @@ from paddleocr import PaddleOCR; \
 d = tempfile.mkdtemp(); \
 p = pathlib.Path(d) / 'w.png'; \
 Image.new('RGB', (8, 8), (255, 255, 255)).save(str(p)); \
-[PaddleOCR(lang=l, enable_mkldnn=False).predict(str(p)) for l in ('german', 'en')]; \
+[PaddleOCR(lang=l, enable_mkldnn=False, text_detection_model_name='PP-OCRv5_mobile_det').predict(str(p)) for l in ('german', 'en')]; \
 print('PaddleOCR warmup done') \
 " || true
 
