@@ -371,9 +371,16 @@ def test_config_ocr_llm_defaults():
     assert s.ocr_llm_fallback_models == []
     assert s.ocr_llm_concurrency == 3
     assert s.ocr_llm_timeout == 90
-    assert s.ocr_llm_max_tokens == 4000
+    assert s.ocr_llm_max_tokens == 8000
     assert s.ocr_llm_image_max_side == 2000
     assert s.ocr_llm_escalate_unclear_max == 2
+    assert s.ocr_llm_reasoning_effort == ""
+    assert s.ocr_llm_strong_reasoning_effort == "medium"
+
+
+def test_config_rejects_unknown_reasoning_effort():
+    with pytest.raises(ValueError):
+        Settings(api_key="test", ocr_llm_strong_reasoning_effort="turbo")
 
 
 def test_config_fallback_models_from_env_json(monkeypatch):
@@ -507,6 +514,38 @@ def test_build_request_shape():
 
 def test_build_request_without_fallbacks_omits_models():
     assert "models" not in build_request(b"x", "m", 10, [])
+
+
+def test_build_request_omits_reasoning_by_default():
+    assert "reasoning" not in build_request(b"x", "m", 10, [])
+
+
+def test_build_request_sets_reasoning_effort():
+    req = build_request(b"x", "m", 10, [], reasoning_effort="low")
+    assert req["reasoning"] == {"effort": "low"}
+
+
+def test_prompt_asks_to_mark_crossed_out_text():
+    assert "[crossed out:" in orb.PROMPT
+
+
+def test_call_llm_passes_reasoning_effort():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result()
+    call_llm(client, b"img", "m", 100, _llm_settings(), reasoning_effort="medium")
+    assert client.chat.send.call_args.kwargs["reasoning"] == {"effort": "medium"}
+
+
+def test_log_reply_includes_finish_reason(caplog):
+    with caplog.at_level("INFO", logger="app.ocr_backends.openrouter"):
+        orb._log_reply(2, _reply(model="google/gemini-3.5-flash", finish_reason="stop"), None)
+    assert "fin=stop" in caplog.text
+
+
+def test_log_reply_warns_on_truncation(caplog):
+    with caplog.at_level("INFO", logger="app.ocr_backends.openrouter"):
+        orb._log_reply(3, _reply(finish_reason="length"), None)
+    assert any(r.levelname == "WARNING" and "fin=length" in r.getMessage() for r in caplog.records)
 
 
 def test_call_llm_parses_result():
@@ -785,7 +824,24 @@ def test_openrouter_run_escalates_handwriting_to_strong_model(tmp_path):
     assert page.escalated is True
     second = client.chat.send.call_args_list[1].kwargs
     assert second["model"] == "google/gemini-3.5-flash"
-    assert second["max_tokens"] == 8000
+    assert second["max_tokens"] == 16000
+
+
+def test_openrouter_run_uses_per_tier_reasoning_effort(tmp_path):
+    settings = _llm_settings(ocr_llm_reasoning_effort="minimal", ocr_llm_strong_reasoning_effort="high")
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+    ]
+    _, client, _ = _run_backend(tmp_path, settings, send)
+    first, second = (c.kwargs for c in client.chat.send.call_args_list)
+    assert first["reasoning"] == {"effort": "minimal"}
+    assert second["reasoning"] == {"effort": "high"}
+
+
+def test_openrouter_run_default_cheap_call_sends_no_reasoning(tmp_path):
+    _, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result()])
+    assert "reasoning" not in client.chat.send.call_args.kwargs
 
 
 @pytest.mark.parametrize("first", [

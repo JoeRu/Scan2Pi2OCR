@@ -36,9 +36,14 @@ class Settings(BaseSettings):
     ocr_llm_fallback_models: list[str] = []  # env: JSON list
     ocr_llm_concurrency: int = 3
     ocr_llm_timeout: int = 90
-    ocr_llm_max_tokens: int = 4000
+    ocr_llm_max_tokens: int = 8000  # strong model gets 2x; reasoning tokens count toward it
     ocr_llm_image_max_side: int = 2000
     ocr_llm_escalate_unclear_max: int = 2
+    # OpenRouter reasoning effort per tier ("" = provider default, no `reasoning` sent).
+    # Reasoning models (e.g. gemini-3.5-flash) burn most of the token budget on
+    # thinking at the default; "medium" keeps crossed-out/handwriting detail.
+    ocr_llm_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
+    ocr_llm_strong_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = "medium"
 
     trash_tmp_files: bool = True
 

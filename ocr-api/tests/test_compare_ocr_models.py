@@ -66,6 +66,37 @@ def test_compare_writes_transcripts_and_rows(tmp_path):
     assert "stop" in table
 
 
+def test_compare_runs_each_model_per_reasoning_effort(tmp_path):
+    img = tmp_path / "page1.png"
+    Image.new("RGB", (50, 50), (255, 255, 255)).save(img)
+    client = MagicMock()
+    client.chat.send.side_effect = lambda **kw: _result(kw["model"], f"effort={kw.get('reasoning')}")
+    settings = Settings(api_key="test", openrouter_api_key="sk")
+
+    rows = compare([img], ["good/model"], [], tmp_path / "out", settings, client,
+                   efforts=["", "low"])
+
+    assert [r["effort"] for r in rows] == ["", "low"]
+    sent = [c.kwargs.get("reasoning") for c in client.chat.send.call_args_list]
+    assert sent == [None, {"effort": "low"}]
+    assert (tmp_path / "out" / "page1__good_model.txt").exists()
+    assert (tmp_path / "out" / "page1__good_model__low.txt").read_text(encoding="utf-8") \
+        == "effort={'effort': 'low'}"
+    assert "low" in format_table(rows)
+
+
+def test_main_passes_efforts(tmp_path):
+    img = tmp_path / "page1.png"
+    Image.new("RGB", (50, 50), (255, 255, 255)).save(img)
+    settings = Settings(api_key="test", openrouter_api_key="sk")
+    with patch("scripts.compare_ocr_models.get_settings", return_value=settings), \
+         patch("scripts.compare_ocr_models._client", return_value=MagicMock()), \
+         patch("scripts.compare_ocr_models.compare", return_value=[]) as mock_compare:
+        main([str(img), "--models", "m", "--efforts", "default,low,medium",
+              "--out", str(tmp_path / "out")])
+    assert mock_compare.call_args.kwargs["efforts"] == ["", "low", "medium"]
+
+
 def test_main_requires_api_key(tmp_path):
     no_key = Settings(api_key="test", openrouter_api_key="")  # explicit: ignore any host env var
     with patch("scripts.compare_ocr_models.get_settings", return_value=no_key):

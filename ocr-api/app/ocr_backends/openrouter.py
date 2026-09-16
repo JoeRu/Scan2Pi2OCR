@@ -36,6 +36,7 @@ PROMPT = (
     "- Keep the reading order and the line breaks.\n"
     "- Keep the original language (mostly German or English; Fraktur is possible).\n"
     "- Include handwritten text. Mark words you cannot read as [?].\n"
+    "- Mark crossed-out text as [crossed out: <text>] instead of merging it into the sentence.\n"
     "- Do not summarize, translate, correct, or add anything.\n"
     "Reply only with a JSON object:\n"
     '{"text": "<transcription>", '
@@ -137,7 +138,8 @@ def recover_truncated_text(content: str) -> str | None:
         return text or None
 
 
-def build_request(image: bytes, model: str, max_tokens: int, fallback_models: list[str]) -> dict:
+def build_request(image: bytes, model: str, max_tokens: int, fallback_models: list[str],
+                  reasoning_effort: str = "") -> dict:
     data_url = "data:image/jpeg;base64," + base64.b64encode(image).decode("ascii")
     request = {
         "model": model,
@@ -156,6 +158,8 @@ def build_request(image: bytes, model: str, max_tokens: int, fallback_models: li
     }
     if fallback_models:
         request["models"] = [model, *fallback_models]
+    if reasoning_effort:
+        request["reasoning"] = {"effort": reasoning_effort}
     return request
 
 
@@ -167,9 +171,11 @@ def _content_text(content) -> str:
     return ""
 
 
-def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settings) -> LlmReply:
+def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settings,
+             reasoning_effort: str = "") -> LlmReply:
     """One transcription request, retried once on error. Raises on failure or empty text."""
-    request = build_request(image, model, max_tokens, settings.ocr_llm_fallback_models)
+    request = build_request(image, model, max_tokens, settings.ocr_llm_fallback_models,
+                            reasoning_effort)
     timeout_ms = settings.ocr_llm_timeout * 1000
     start = time.monotonic()
     try:
@@ -291,7 +297,8 @@ class OpenRouterBackend:
         page_no = index + 1
         try:
             image = prepare_image(path, settings.ocr_llm_image_max_side)
-            reply = call_llm(client, image, settings.ocr_llm_model, settings.ocr_llm_max_tokens, settings)
+            reply = call_llm(client, image, settings.ocr_llm_model, settings.ocr_llm_max_tokens,
+                             settings, settings.ocr_llm_reasoning_effort)
         except Exception as exc:
             logger.warning("Page %d: LLM OCR failed, keeping Tesseract text: %s: %s",
                            page_no, type(exc).__name__, exc)
@@ -304,7 +311,8 @@ class OpenRouterBackend:
             return _PageOutcome(reply, False, reply.cost)
 
         try:
-            strong_reply = call_llm(client, image, strong, 2 * settings.ocr_llm_max_tokens, settings)
+            strong_reply = call_llm(client, image, strong, 2 * settings.ocr_llm_max_tokens,
+                                    settings, settings.ocr_llm_strong_reasoning_effort)
         except Exception as exc:
             logger.warning("Page %d: escalation to %s failed, keeping %s result: %s: %s",
                            page_no, strong, reply.model, type(exc).__name__, exc)
@@ -314,9 +322,12 @@ class OpenRouterBackend:
 
 
 def _log_reply(page_no: int, reply: LlmReply, escalate_reason: str | None) -> None:
-    logger.info(
-        "Page %d: model=%s tokens=%d/%d cost=$%.4f latency=%.1fs%s",
-        page_no, reply.model, reply.prompt_tokens, reply.completion_tokens,
+    # A truncated reply means the token budget ran out (often on reasoning): warn.
+    level = logging.WARNING if reply.finish_reason == "length" else logging.INFO
+    logger.log(
+        level,
+        "Page %d: model=%s fin=%s tokens=%d/%d cost=$%.4f latency=%.1fs%s",
+        page_no, reply.model, reply.finish_reason, reply.prompt_tokens, reply.completion_tokens,
         reply.cost, reply.latency_s,
         f" escalate={escalate_reason}" if escalate_reason else "",
     )
