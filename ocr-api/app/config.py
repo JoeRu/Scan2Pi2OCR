@@ -36,7 +36,12 @@ class Settings(BaseSettings):
     ocr_llm_fallback_models: list[str] = []  # env: JSON list
     ocr_llm_concurrency: int = 3
     ocr_llm_timeout: int = 90
-    ocr_llm_max_tokens: int = 8000  # strong model gets 2x; reasoning tokens count toward it
+    # Output token budgets; reasoning tokens count toward them. The cheap pass
+    # normally needs < 800 tokens, so a small cap cuts a repetition loop off after
+    # seconds (it then escalates as truncated). Strong/line+box replies need up to
+    # ~6k on dense table pages.
+    ocr_llm_max_tokens: int = 3000
+    ocr_llm_strong_max_tokens: int = 16000
     ocr_llm_image_max_side: int = 2000
     ocr_llm_escalate_unclear_max: int = 2
     # OpenRouter reasoning effort per tier ("" = provider default, no `reasoning` sent).

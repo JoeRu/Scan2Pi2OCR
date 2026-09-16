@@ -440,7 +440,7 @@ class OpenRouterBackend:
             return _PageOutcome(reply, False, reply.cost, plain_pdf_text)
         _log_reply(page_no, reply, reason)
 
-        strong_tokens = 2 * settings.ocr_llm_max_tokens
+        strong_tokens = settings.ocr_llm_strong_max_tokens
         strong_effort = settings.ocr_llm_strong_reasoning_effort
         if mode == "positioned":
             try:

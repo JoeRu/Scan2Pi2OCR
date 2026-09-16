@@ -53,8 +53,8 @@ def compare(images: list[Path], models: list[str], truths: list[Path], out_dir: 
         for model, effort in itertools.product(models, efforts or [""]):
             row = {"page": image_path.name, "model": model, "effort": effort}
             try:
-                # 2x like the escalation call, so reasoning can't truncate the comparison
-                reply = call_llm(client, image, model, 2 * settings.ocr_llm_max_tokens, settings, effort)
+                # strong-model budget, so reasoning can't truncate the comparison
+                reply = call_llm(client, image, model, settings.ocr_llm_strong_max_tokens, settings, effort)
             except Exception as exc:
                 row["error"] = f"{type(exc).__name__}: {exc}"
                 rows.append(row)

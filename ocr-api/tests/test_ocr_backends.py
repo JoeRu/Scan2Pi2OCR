@@ -371,7 +371,8 @@ def test_config_ocr_llm_defaults():
     assert s.ocr_llm_fallback_models == []
     assert s.ocr_llm_concurrency == 3
     assert s.ocr_llm_timeout == 90
-    assert s.ocr_llm_max_tokens == 8000
+    assert s.ocr_llm_max_tokens == 3000
+    assert s.ocr_llm_strong_max_tokens == 16000
     assert s.ocr_llm_image_max_side == 2000
     assert s.ocr_llm_escalate_unclear_max == 2
     assert s.ocr_llm_reasoning_effort == ""
@@ -826,6 +827,20 @@ def test_openrouter_run_escalates_handwriting_to_strong_model(tmp_path):
     second = client.chat.send.call_args_list[1].kwargs
     assert second["model"] == "google/gemini-3.1-pro-preview"
     assert second["max_tokens"] == 16000
+    # cheap first pass has its own, much smaller budget: its normal output is < 800
+    # tokens, so a repetition loop is cut off after seconds instead of 8k tokens
+    assert client.chat.send.call_args_list[0].kwargs["max_tokens"] == 3000
+
+
+def test_openrouter_run_uses_separate_token_budgets(tmp_path):
+    settings = _llm_settings(ocr_llm_max_tokens=1234, ocr_llm_strong_max_tokens=5678,
+                             ocr_llm_pdf_text="positioned")
+    send = [_llm_result(text="cheap", handwriting=True),
+            _lines_result(("Hallo", [0, 0, 100, 100], True))]
+    _, client, _ = _run_backend(tmp_path, settings, send)
+    first, second = (c.kwargs for c in client.chat.send.call_args_list)
+    assert first["max_tokens"] == 1234
+    assert second["max_tokens"] == 5678
 
 
 def test_openrouter_run_uses_per_tier_reasoning_effort(tmp_path):
