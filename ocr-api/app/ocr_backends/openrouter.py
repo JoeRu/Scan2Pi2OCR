@@ -319,7 +319,11 @@ def call_llm_lines(client, image: bytes, model: str, max_tokens: int, settings: 
     content = _content_text(result.choices[0].message.content)
     lines = parse_box_lines(content, width_px, height_px)
     if not lines:
-        raise ValueError(f"no usable line boxes from {model}")
+        usage = result.usage
+        raise ValueError(
+            f"no usable line boxes from {model} (fin={result.choices[0].finish_reason}, "
+            f"out_tokens={getattr(usage, 'completion_tokens', None)}, chars={len(content)}, "
+            f"latency={latency:.1f}s)")
     data = _load_json_content(content.strip())
     handwriting = any(isinstance(e, dict) and e.get("handwritten") is True for e in data["lines"])
     text = "\n".join(line.text for line in lines)

@@ -25,10 +25,18 @@ _UNICODE_FONT = "DejaVu"
 _BLOCK_FONT_PT = 4
 
 
-def _pdf_safe(text: str, text_font: str) -> str:
+def _pdf_safe(text: str, text_font: str, font_cmap: dict | None = None) -> str:
+    """Make text encodable by the text-layer font.
+
+    fpdf2 raises TypeError (instead of skipping) for characters the embedded TTF
+    has no glyph for, e.g. math-alphanumeric symbols an LLM transcription can
+    contain; one such character used to fail the whole scan. Replace them with "?".
+    """
     if text_font == "Helvetica":
         return text.encode("latin-1", "replace").decode("latin-1")
-    return text
+    if font_cmap is None:
+        return text
+    return "".join(ch if ord(ch) in font_cmap else "?" for ch in text)
 
 
 def _find_unicode_font() -> str | None:
@@ -72,6 +80,7 @@ def build_searchable_pdf(pages: list[Path], pages_ocr: list[OcrPage], output_pat
         pdf.image(str(page_path), x=0, y=0, w=w_mm, h=h_mm)
 
         pdf.set_font(text_font)
+        font_cmap = getattr(pdf.current_font, "cmap", None)
         with pdf.local_context(text_mode=TextMode.INVISIBLE):
             for line in ocr_page.lines:
                 if not line.text:
@@ -82,7 +91,7 @@ def build_searchable_pdf(pages: list[Path], pages_ocr: list[OcrPage], output_pat
                 pdf.set_font_size(max(line_h_px / dpi_y * 72, 1))
                 x_mm = line.x0 / dpi_x * 25.4
                 baseline_mm = (line.y0 + 0.8 * line_h_px) / dpi_y * 25.4
-                pdf.text(x_mm, baseline_mm, _pdf_safe(line.text, text_font))
+                pdf.text(x_mm, baseline_mm, _pdf_safe(line.text, text_font, font_cmap))
 
             if ocr_page.pdf_text == "block" and ocr_page.transcript:
                 # Unpositioned: searchable (PDF viewers, Paperless) but highlights
@@ -90,7 +99,7 @@ def build_searchable_pdf(pages: list[Path], pages_ocr: list[OcrPage], output_pat
                 pdf.set_font_size(_BLOCK_FONT_PT)
                 step_mm = _BLOCK_FONT_PT / 72 * 25.4
                 for n, text in enumerate(t for t in ocr_page.transcript.splitlines() if t.strip()):
-                    pdf.text(2, 2 + (n + 1) * step_mm, _pdf_safe(text, text_font))
+                    pdf.text(2, 2 + (n + 1) * step_mm, _pdf_safe(text, text_font, font_cmap))
 
     pdf.output(str(output_path))
     logger.info("Searchable PDF written: %s (%d page(s))", output_path.name, len(pages))

@@ -1054,7 +1054,7 @@ def test_call_llm_lines_returns_reply_and_pixel_lines():
 def test_call_llm_lines_raises_on_unusable_boxes():
     client = MagicMock()
     client.chat.send.return_value = _lines_result(content="not json")
-    with pytest.raises(ValueError, match="box"):
+    with pytest.raises(ValueError, match=r"box.*fin=stop.*out_tokens=40"):
         call_llm_lines(client, b"img", "m", 100, _llm_settings(), "", width_px=10, height_px=10)
     assert client.chat.send.call_count == 1
 
@@ -1162,6 +1162,21 @@ def test_build_searchable_pdf_block_adds_transcript_text(tmp_path):
     text = _extract_pdf_text(out)
     assert "printed" in text
     assert "handschrift zeile" in text and "zweite zeile" in text
+
+
+def test_build_searchable_pdf_skips_glyphs_missing_from_font(tmp_path):
+    # Real scan 2026-09-16: an LLM line held a character DejaVuSans has no glyph
+    # for; fpdf raised TypeError and the whole job failed. U+1D465 (math italic x)
+    # is such a character. The PDF must still be built, with the rest of the text.
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    ocr = OcrPage([OcrLine("Wert \U0001D465 = 5", 10, 10, 200, 30)],
+                  transcript="Block \U0001D465 zeile", pdf_text="block")
+    build_searchable_pdf([page], [ocr], out)
+    text = _extract_pdf_text(out)
+    assert "Wert" in text and "= 5" in text
+    assert "Block" in text
 
 
 def test_build_searchable_pdf_tesseract_mode_ignores_transcript(tmp_path):
