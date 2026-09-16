@@ -780,9 +780,11 @@ def _page_name(send_kwargs):
     return base64.b64decode(url.split(",", 1)[1]).decode()
 
 
-def _run_backend(tmp_path, settings, send, n_pages=1, client_error=None):
+def _run_backend(tmp_path, settings, send, n_pages=1, client_error=None, tesseract_lines=None):
     pages = [tmp_path / f"scan_{i:04d}.pnm.tif" for i in range(1, n_pages + 1)]
-    tesseract_pages = [OcrPage([OcrLine(f"tess {i}", 0, 0, 10, 5)]) for i in range(1, n_pages + 1)]
+    tesseract_pages = [OcrPage(list(tesseract_lines) if tesseract_lines is not None
+                               else [OcrLine(f"tess {i}", 0, 0, 10, 5)])
+                       for i in range(1, n_pages + 1)]
     client = MagicMock()
     client.chat.send.side_effect = send
     client_patch = (patch("app.ocr_backends.openrouter._client", side_effect=client_error)
@@ -1055,7 +1057,7 @@ def test_call_llm_lines_returns_reply_and_pixel_lines():
     client = MagicMock()
     client.chat.send.return_value = _lines_result(
         ("Er hat 70 €", [100, 100, 120, 500], True), ("Viel Erfolg!", [500, 400, 520, 600], False))
-    reply, lines = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
+    reply, lines, _flags = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
                                   _llm_settings(), "", width_px=1000, height_px=2000)
     sent = client.chat.send.call_args.kwargs
     assert sent["messages"][0]["content"][0]["text"] == LINES_PROMPT
@@ -1091,7 +1093,7 @@ def test_call_llm_lines_real_sdk_serializes_json_schema():
 
     client = openrouter.OpenRouter(api_key="sk-test", retry_config=None,
                                    client=httpx.Client(transport=httpx.MockTransport(handler)))
-    reply, lines = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
+    reply, lines, _flags = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
                                   _llm_settings(), "", width_px=100, height_px=100)
     fmt = captured["body"]["response_format"]
     assert fmt["type"] == "json_schema"
@@ -1177,6 +1179,113 @@ def test_build_searchable_pdf_block_adds_transcript_text(tmp_path):
     text = _extract_pdf_text(out)
     assert "printed" in text
     assert "handschrift zeile" in text and "zweite zeile" in text
+
+
+# Hybrid positioned: printed Gemini lines that Tesseract read the same way keep
+# Tesseract's text + box (real scans: Gemini line mode misread printed "25,00 €
+# Aufnahmegebühr" as "25,00 — Aufnahmegeböhr" while Tesseract read it correctly).
+from app.ocr_backends.openrouter import merge_printed_lines
+
+
+def test_merge_keeps_handwritten_gemini_line_even_if_tesseract_overlaps():
+    gem = [OcrLine("Er hat 70 €", 100, 100, 500, 140)]
+    tess = [OcrLine("Er hat 70 E", 105, 102, 495, 138)]
+    assert merge_printed_lines(gem, [True], tess) == gem
+
+
+def test_merge_uses_tesseract_for_similar_printed_line():
+    gem = [OcrLine("6. Ein Sportverein verlangt einmalig 25,00 — Aufnahmegeböhr", 90, 110, 760, 150)]
+    tess = [OcrLine("6. Ein Sportverein verlangt einmalig 25,00 € Aufnahmegebühr", 92, 112, 755, 148)]
+    assert merge_printed_lines(gem, [False], tess) == tess
+
+
+def test_merge_keeps_gemini_for_dissimilar_printed_line():
+    gem = [OcrLine("Dein Name: Mu Er", 90, 80, 400, 110)]
+    tess = [OcrLine("Dein Name: J\\Ae£r", 92, 82, 390, 108)]
+    assert merge_printed_lines(gem, [False], tess) == gem
+
+
+def test_merge_keeps_gemini_when_no_tesseract_line_overlaps():
+    gem = [OcrLine("Viel Erfolg!", 400, 600, 520, 630)]
+    tess = [OcrLine("Viel Erfolg!", 10, 10, 130, 40)]
+    assert merge_printed_lines(gem, [False], tess) == gem
+
+
+def test_merge_joins_several_tesseract_lines_inside_one_gemini_line():
+    gem = [OcrLine("Prozent ab 95 %", 100, 500, 400, 530)]
+    tess = [OcrLine("ab 95 %", 230, 502, 390, 528), OcrLine("Prozent", 105, 502, 200, 528)]
+    merged = merge_printed_lines(gem, [False], tess)
+    assert merged == [OcrLine("Prozent", 105, 502, 200, 528), OcrLine("ab 95 %", 230, 502, 390, 528)]
+
+
+def test_merge_ignores_tesseract_line_mostly_outside_gemini_box():
+    # Tesseract merged a whole table row; the Gemini cell covers only a small part of it.
+    gem = [OcrLine("ab 95 %", 230, 500, 390, 530)]
+    tess = [OcrLine("Prozent ab 95 % ab 80 % ab 65 % ab 50 %", 100, 500, 900, 530)]
+    assert merge_printed_lines(gem, [False], tess) == gem
+
+
+def test_merge_uses_each_tesseract_line_once_and_drops_duplicate_gemini_line():
+    gem = [OcrLine("Seite 4 / 4", 350, 1100, 640, 1125), OcrLine("Seite 4 / 4", 350, 1100, 640, 1125)]
+    tess = [OcrLine("Seite 4 / 4", 352, 1101, 638, 1124)]
+    merged = merge_printed_lines(gem, [False, False], tess)
+    assert merged == [tess[0]]
+
+
+def test_merge_uses_each_tesseract_line_once_for_distinct_areas():
+    gem = [OcrLine("Seite 4 / 4", 350, 1100, 640, 1125), OcrLine("Seite 4 / 4", 350, 50, 640, 75)]
+    tess = [OcrLine("Seite 4 / 4", 352, 1101, 638, 1124)]
+    merged = merge_printed_lines(gem, [False, False], tess)
+    assert merged == [tess[0], gem[1]]
+
+
+@pytest.mark.parametrize("split_first", [False, True])
+def test_merge_drops_printed_gemini_fragment_covered_by_used_tesseract_line(split_first):
+    # Real page: Tesseract reads "a) Frau Adam ... bezahlt? (2 P)" as one line, Gemini splits
+    # "(2 P)" off. After the long line is replaced, the "(2 P)" fragment must not be duplicated,
+    # regardless of the order Gemini lists the two lines in.
+    long_line = OcrLine("a) Frau Adam ist 6 Monate Mitglied. Wie viel hat sie insgesamt bezahlt?",
+                        100, 200, 1100, 240)
+    fragment = OcrLine("(2 P)", 1120, 198, 1210, 238)
+    tess = [OcrLine("a) Frau Adam ist 6 Monate Mitglied. Wie viel hat sie insgesamt bezahlt? (2 P)",
+                    102, 201, 1208, 239)]
+    gem = [fragment, long_line] if split_first else [long_line, fragment]
+    # ~90% of the Tesseract line lies inside the long Gemini line, so the long line matches it
+    assert merge_printed_lines(gem, [False, False], tess) == tess
+
+
+def test_merge_keeps_handwritten_line_inside_used_tesseract_line():
+    tess = [OcrLine("Begründung: Die Aufnahmegebühr", 100, 500, 700, 540)]
+    gem = [OcrLine("Begründung: Die Aufnahmegeböhr", 100, 500, 700, 540),
+           OcrLine("weil", 600, 505, 690, 538)]
+    assert merge_printed_lines(gem, [False, True], tess) == [tess[0], gem[1]]
+
+
+def test_openrouter_run_positioned_hybrid_merges_printed_tesseract_lines(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="positioned")
+    # _run_backend patches the page to 2000 x 3000 px; boxes below are 0-1000 normalized
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _lines_result(("25,00 — Aufnahmegeböhr", [100, 100, 120, 500], False),   # -> px 200,300,1000,360
+                      ("Sie bezahlt 171 euro", [200, 100, 230, 600], True)),     # -> px 200,600,1200,690
+    ]
+    tess = [OcrLine("25,00 € Aufnahmegebühr", 205, 302, 995, 358),
+            OcrLine("Sie bezqhlt 1?1 eu", 210, 610, 1190, 680)]
+    result, _, _ = _run_backend(tmp_path, settings, send, tesseract_lines=tess)
+    page = result[0]
+    assert page.pdf_text == "positioned"
+    assert page.lines == [tess[0], OcrLine("Sie bezahlt 171 euro", 200, 600, 1200, 690)]
+    assert page.transcript == "25,00 € Aufnahmegebühr\nSie bezahlt 171 euro"
+
+
+def test_call_llm_lines_returns_handwritten_flags():
+    client = MagicMock()
+    client.chat.send.return_value = _lines_result(
+        ("printed", [0, 0, 10, 10], False), ("hand", [20, 0, 30, 10], True))
+    _, lines, flags = call_llm_lines(client, b"img", "m", 100, _llm_settings(), "",
+                                     width_px=1000, height_px=1000)
+    assert [l.text for l in lines] == ["printed", "hand"]
+    assert flags == [False, True]
 
 
 def test_build_searchable_pdf_skips_glyphs_missing_from_font(tmp_path):

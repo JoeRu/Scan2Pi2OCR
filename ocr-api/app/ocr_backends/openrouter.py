@@ -6,6 +6,8 @@ failure leaves the page with its Tesseract text, so a scan never fails
 because of the LLM.
 """
 import base64
+import dataclasses
+import difflib
 import io
 import json
 import logging
@@ -85,6 +87,12 @@ LINES_RESPONSE_FORMAT = {
 
 # A page's boxes are only used if at least this share of its lines is valid.
 _MIN_VALID_LINE_RATIO = 0.8
+# Hybrid merge: a Tesseract line belongs to a printed LLM line if this share of its
+# box lies inside the LLM box, and replaces it if the texts are at least this similar
+# (high enough that Tesseract's garbled reading of a short mixed line such as
+# "Dein Name: <handwritten>" does not win; a one-glyph misread scores > 0.9).
+_MIN_TESSERACT_INSIDE = 0.5
+_MIN_PRINTED_SIMILARITY = 0.8
 
 
 @dataclass
@@ -278,19 +286,13 @@ def _valid_box(box) -> bool:
     return ymax > ymin and xmax > xmin
 
 
-def parse_box_lines(content: str, width_px: int, height_px: int) -> list[OcrLine] | None:
-    """Parse a LINES_RESPONSE_FORMAT reply into pixel OcrLines.
-
-    box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000. Invalid entries are
-    dropped; returns None when nothing usable is left or fewer than
-    _MIN_VALID_LINE_RATIO of the entries are valid (the page's boxes are then
-    not trusted at all).
-    """
+def _parse_box_entries(content: str, width_px: int, height_px: int) -> list[tuple[OcrLine, bool]] | None:
+    """(pixel OcrLine, handwritten) per valid entry of a LINES_RESPONSE_FORMAT reply."""
     data = _load_json_content((content or "").strip())
     entries = data.get("lines") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not entries:
         return None
-    lines = []
+    parsed = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -299,35 +301,106 @@ def parse_box_lines(content: str, width_px: int, height_px: int) -> list[OcrLine
         if not (isinstance(text, str) and text.strip() and _valid_box(box)):
             continue
         ymin, xmin, ymax, xmax = box
-        lines.append(OcrLine(
+        parsed.append((OcrLine(
             text=text.strip(),
             x0=round(xmin / 1000 * width_px), y0=round(ymin / 1000 * height_px),
             x1=round(xmax / 1000 * width_px), y1=round(ymax / 1000 * height_px),
-        ))
-    if not lines or len(lines) / len(entries) < _MIN_VALID_LINE_RATIO:
+        ), entry.get("handwritten") is True))
+    if not parsed or len(parsed) / len(entries) < _MIN_VALID_LINE_RATIO:
         return None
-    return lines
+    return parsed
+
+
+def parse_box_lines(content: str, width_px: int, height_px: int) -> list[OcrLine] | None:
+    """Parse a LINES_RESPONSE_FORMAT reply into pixel OcrLines.
+
+    box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000. Invalid entries are
+    dropped; returns None when nothing usable is left or fewer than
+    _MIN_VALID_LINE_RATIO of the entries are valid (the page's boxes are then
+    not trusted at all).
+    """
+    parsed = _parse_box_entries(content, width_px, height_px)
+    return [line for line, _ in parsed] if parsed else None
+
+
+def _overlap_share(inner: OcrLine, outer: OcrLine) -> float:
+    """Share of `inner`'s box area that lies inside `outer`'s box."""
+    w = min(inner.x1, outer.x1) - max(inner.x0, outer.x0)
+    h = min(inner.y1, outer.y1) - max(inner.y0, outer.y0)
+    area = (inner.x1 - inner.x0) * (inner.y1 - inner.y0)
+    if w <= 0 or h <= 0 or area <= 0:
+        return 0.0
+    return w * h / area
+
+
+def merge_printed_lines(llm_lines: list[OcrLine], handwritten: list[bool],
+                        tesseract_lines: list[OcrLine]) -> list[OcrLine]:
+    """Hybrid positioned text layer: LLM lines, but printed ones Tesseract read the same way keep
+    Tesseract's text and boxes.
+
+    Gemini's line-level mode intermittently misreads printed glyphs (e.g. "€" -> "—", "ü" -> "ö")
+    that Tesseract gets right. For each printed LLM line, the Tesseract lines lying mostly inside
+    its box are joined left to right; if that text is similar enough, they replace the LLM line.
+    Handwritten lines, dissimilar text, and printed text Tesseract missed stay LLM lines. A printed
+    LLM fragment lying mostly inside a Tesseract line that replaced another LLM line (e.g. Gemini
+    splits off "(2 P)" that Tesseract kept in the question line) is dropped as a duplicate.
+    """
+    used: set[int] = set()
+    replacements: dict[int, list[OcrLine]] = {}
+    for n, (line, is_handwritten) in enumerate(zip(llm_lines, handwritten)):
+        if is_handwritten:
+            continue
+        inside = sorted(
+            (i for i, t in enumerate(tesseract_lines)
+             if i not in used and _overlap_share(t, line) >= _MIN_TESSERACT_INSIDE),
+            key=lambda i: (tesseract_lines[i].x0, tesseract_lines[i].y0),
+        )
+        candidates = [tesseract_lines[i] for i in inside]
+        joined = " ".join(t.text for t in candidates)
+        if candidates and _similarity(joined, line.text) >= _MIN_PRINTED_SIMILARITY:
+            used.update(inside)
+            replacements[n] = candidates
+
+    used_lines = [tesseract_lines[i] for i in used]
+    merged: list[OcrLine] = []
+    for n, (line, is_handwritten) in enumerate(zip(llm_lines, handwritten)):
+        if n in replacements:
+            merged.extend(replacements[n])
+        elif not is_handwritten and any(_overlap_share(line, t) >= _MIN_TESSERACT_INSIDE
+                                        for t in used_lines):
+            continue  # printed fragment already covered by a Tesseract line used above
+        else:
+            merged.append(line)
+    return merged
+
+
+def _similarity(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, " ".join(a.split()), " ".join(b.split())).ratio()
 
 
 def call_llm_lines(client, image: bytes, model: str, max_tokens: int, settings: Settings,
-                   reasoning_effort: str, width_px: int, height_px: int) -> tuple[LlmReply, list[OcrLine]]:
-    """Line-level transcription with boxes. Raises ValueError if the boxes are unusable."""
+                   reasoning_effort: str, width_px: int, height_px: int
+                   ) -> tuple[LlmReply, list[OcrLine], list[bool]]:
+    """Line-level transcription with boxes -> (reply, pixel lines, handwritten flag per line).
+
+    Raises ValueError if the boxes are unusable.
+    """
     request = build_request(image, model, max_tokens, settings.ocr_llm_fallback_models,
                             reasoning_effort, prompt=LINES_PROMPT,
                             response_format=LINES_RESPONSE_FORMAT)
     result, latency = _send(client, request, model, settings)
     content = _content_text(result.choices[0].message.content)
-    lines = parse_box_lines(content, width_px, height_px)
-    if not lines:
+    parsed = _parse_box_entries(content, width_px, height_px)
+    if not parsed:
         usage = result.usage
         raise ValueError(
             f"no usable line boxes from {model} (fin={result.choices[0].finish_reason}, "
             f"out_tokens={getattr(usage, 'completion_tokens', None)}, chars={len(content)}, "
             f"latency={latency:.1f}s)")
-    data = _load_json_content(content.strip())
-    handwriting = any(isinstance(e, dict) and e.get("handwritten") is True for e in data["lines"])
+    lines = [line for line, _ in parsed]
+    flags = [is_handwritten for _, is_handwritten in parsed]
     text = "\n".join(line.text for line in lines)
-    return _reply_from(result, model, latency, text, handwriting, False), lines
+    return _reply_from(result, model, latency, text, any(flags), False), lines, flags
 
 
 def _image_size(path: Path) -> tuple[int, int]:
@@ -393,8 +466,8 @@ class OpenRouterBackend:
         with client:
             with ThreadPoolExecutor(max_workers=max(1, settings.ocr_llm_concurrency)) as pool:
                 outcomes = list(pool.map(
-                    lambda item: self._transcribe(client, settings, item[0], item[1]),
-                    enumerate(pages),
+                    lambda i: self._transcribe(client, settings, i, pages[i], result[i].lines),
+                    range(len(pages)),
                 ))
 
         for ocr_page, outcome in zip(result, outcomes):
@@ -418,7 +491,8 @@ class OpenRouterBackend:
         )
         return result
 
-    def _transcribe(self, client, settings: Settings, index: int, path: Path) -> _PageOutcome | None:
+    def _transcribe(self, client, settings: Settings, index: int, path: Path,
+                    tesseract_lines: list[OcrLine]) -> _PageOutcome | None:
         page_no = index + 1
         try:
             image = prepare_image(path, settings.ocr_llm_image_max_side)
@@ -445,14 +519,18 @@ class OpenRouterBackend:
         if mode == "positioned":
             try:
                 width_px, height_px = _image_size(path)
-                strong_reply, lines = call_llm_lines(client, image, strong, strong_tokens, settings,
-                                                     strong_effort, width_px, height_px)
+                strong_reply, llm_lines, handwritten = call_llm_lines(
+                    client, image, strong, strong_tokens, settings, strong_effort, width_px, height_px)
+                lines = merge_printed_lines(llm_lines, handwritten, tesseract_lines)
             except Exception as exc:
                 logger.warning("Page %d: positioned lines from %s failed, falling back to block: %s: %s",
                                page_no, strong, type(exc).__name__, exc)
                 plain_pdf_text = "block"
             else:
-                _log_reply(page_no, strong_reply, None, pdf_text="positioned")
+                strong_reply = dataclasses.replace(strong_reply, text="\n".join(l.text for l in lines))
+                kept = sum(1 for line in lines if line not in llm_lines)
+                _log_reply(page_no, strong_reply, None,
+                           pdf_text=f"positioned tesseract_lines={kept}/{len(lines)}")
                 return _PageOutcome(strong_reply, True, reply.cost + strong_reply.cost,
                                     "positioned", lines)
 
