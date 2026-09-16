@@ -1,7 +1,7 @@
 # Design: OpenRouter LLM OCR engine (hybrid with Tesseract)
 
 **Date:** 2026-09-16
-**Status:** Approved (pending spec review)
+**Status:** Approved
 
 ## Goal
 
@@ -20,7 +20,7 @@ vision LLM via OpenRouter, so that:
   layer, and therefore Ctrl+F in the PDF **and Paperless full-text search**
   (Paperless reads the PDF layer, and `deliver_paperless` uploads only the
   PDF), covers only what Tesseract read. Handwriting is not searchable there.
-  See *Open question* below.
+  Deferred; see *Out of scope*.
 - **Model choice: escalation tier.** Every page goes to a cheap model first.
   Pages the model reports as handwritten or uncertain are re-run on a stronger
   model.
@@ -243,16 +243,12 @@ explicit approval first.
    page. Check `ocr_pages` in the status and the cost log line.
 5. Merge to master.
 
-## Open question (for spec review)
-
-**Handwriting in Paperless full-text search.** Paperless indexes the PDF text
-layer, which comes from Tesseract. Option: after upload, poll the Paperless
-consume task for the document id and `PATCH /api/documents/<id>/` with
-`content=<LLM transcript>`. The worker already does a similar PATCH for
-metadata, so this is small but adds a task-polling step. Default in this spec:
-**not included** (a follow-up), unless the reviewer decides otherwise.
-
 ## Out of scope
+
+- LLM transcript in Paperless full-text search (decided 2026-09-16: deferred).
+  Follow-up: poll the Paperless consume task for the document id, then `PATCH
+  /api/documents/<id>/` with `content=<LLM transcript>`. Added to
+  `docs/backlog.md` during implementation.
 
 - Positioned (highlightable) text for handwriting. This would need LLM/box
   alignment ("Hybrid + align").
