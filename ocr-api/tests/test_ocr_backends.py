@@ -381,3 +381,196 @@ def test_config_fallback_models_from_env_json(monkeypatch):
     assert Settings(api_key="test").ocr_llm_fallback_models == [
         "openai/gpt-5-mini", "anthropic/claude-haiku-4.5",
     ]
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter LLM OCR helpers
+# ---------------------------------------------------------------------------
+import base64
+import io
+import json as _json
+from types import SimpleNamespace
+
+from app.ocr_backends import openrouter as orb
+from app.ocr_backends.openrouter import (
+    LlmReply,
+    build_request,
+    call_llm,
+    escalation_reason,
+    parse_reply,
+    prepare_image,
+)
+
+
+def _llm_settings(**kwargs):
+    base = dict(api_key="test", openrouter_api_key="sk-test")
+    base.update(kwargs)
+    return Settings(**base)
+
+
+def _llm_result(text="Hallo Welt", handwriting=False, uncertain=False,
+                model="google/gemini-3.1-flash-lite", finish_reason="stop",
+                cost=0.001, content=None):
+    """Fake openrouter ChatResult (only the attributes call_llm reads)."""
+    if content is None:
+        content = _json.dumps({"text": text, "handwriting": handwriting, "uncertain": uncertain})
+    return SimpleNamespace(
+        model=model,
+        choices=[SimpleNamespace(finish_reason=finish_reason,
+                                 message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(prompt_tokens=1500, completion_tokens=40, cost=cost),
+    )
+
+
+def _reply(**kwargs):
+    base = dict(text="t", handwriting=False, uncertain=False, model="m", finish_reason="stop",
+                prompt_tokens=0, completion_tokens=0, cost=0.0, latency_s=0.0)
+    base.update(kwargs)
+    return LlmReply(**base)
+
+
+def test_prepare_image_grayscale_jpeg_downscaled(tmp_path):
+    src = tmp_path / "scan_0001.pnm.tif"
+    PILImage.new("RGB", (3000, 1500), (200, 10, 10)).save(str(src), format="TIFF")
+    with PILImage.open(io.BytesIO(prepare_image(src, 2000))) as img:
+        assert img.format == "JPEG"
+        assert img.mode == "L"
+        assert img.size == (2000, 1000)
+
+
+def test_prepare_image_never_upscales(tmp_path):
+    src = tmp_path / "small.tif"
+    PILImage.new("RGB", (800, 600), (255, 255, 255)).save(str(src), format="TIFF")
+    with PILImage.open(io.BytesIO(prepare_image(src, 2000))) as img:
+        assert img.size == (800, 600)
+
+
+def test_parse_reply_plain_json():
+    assert parse_reply('{"text": "Hallo", "handwriting": true, "uncertain": false}') == ("Hallo", True, False)
+
+
+def test_parse_reply_fenced_json():
+    content = '```json\n{"text": "Hallo", "handwriting": false, "uncertain": true}\n```'
+    assert parse_reply(content) == ("Hallo", False, True)
+
+
+def test_parse_reply_non_json_returns_raw_text():
+    assert parse_reply("Sehr geehrte Damen und Herren") == ("Sehr geehrte Damen und Herren", False, False)
+
+
+def test_parse_reply_empty():
+    assert parse_reply("") == ("", False, False)
+
+
+def test_build_request_shape():
+    image = b"\xff\xd8img"
+    req = build_request(image, "google/gemini-3.1-flash-lite", 4000, ["openai/gpt-5-mini"])
+    assert req["model"] == "google/gemini-3.1-flash-lite"
+    assert req["models"] == ["google/gemini-3.1-flash-lite", "openai/gpt-5-mini"]
+    assert req["provider"] == {"data_collection": "deny"}
+    assert req["temperature"] == 0
+    assert req["max_tokens"] == 4000
+    assert req["response_format"] == {"type": "json_object"}
+    parts = req["messages"][0]["content"]
+    assert req["messages"][0]["role"] == "user"
+    assert parts[0] == {"type": "text", "text": orb.PROMPT}
+    assert parts[1] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(image).decode()},
+    }
+
+
+def test_build_request_without_fallbacks_omits_models():
+    assert "models" not in build_request(b"x", "m", 10, [])
+
+
+def test_call_llm_parses_result():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(text="Hallo", handwriting=True, cost=0.002)
+    reply = call_llm(client, b"img", "google/gemini-3.1-flash-lite", 4000, _llm_settings())
+    assert reply.text == "Hallo"
+    assert reply.handwriting is True
+    assert reply.uncertain is False
+    assert reply.model == "google/gemini-3.1-flash-lite"
+    assert reply.finish_reason == "stop"
+    assert (reply.prompt_tokens, reply.completion_tokens, reply.cost) == (1500, 40, 0.002)
+    assert client.chat.send.call_args.kwargs["timeout_ms"] == 90_000
+
+
+def test_call_llm_uses_requested_model_when_result_has_none():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(model=None)
+    assert call_llm(client, b"img", "x/requested", 100, _llm_settings()).model == "x/requested"
+
+
+def test_call_llm_retries_once_then_succeeds():
+    client = MagicMock()
+    client.chat.send.side_effect = [ConnectionError("boom"), _llm_result(text="ok")]
+    with patch("app.ocr_backends.openrouter.time.sleep") as sleep:
+        reply = call_llm(client, b"img", "m", 100, _llm_settings())
+    assert reply.text == "ok"
+    assert client.chat.send.call_count == 2
+    sleep.assert_called_once_with(2.0)
+
+
+def test_call_llm_raises_after_second_failure():
+    client = MagicMock()
+    client.chat.send.side_effect = ConnectionError("down")
+    with patch("app.ocr_backends.openrouter.time.sleep"):
+        with pytest.raises(ConnectionError):
+            call_llm(client, b"img", "m", 100, _llm_settings())
+    assert client.chat.send.call_count == 2
+
+
+def test_call_llm_empty_text_raises_without_retry():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(text="")
+    with pytest.raises(ValueError, match="empty"):
+        call_llm(client, b"img", "m", 100, _llm_settings())
+    assert client.chat.send.call_count == 1
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    ({}, None),
+    ({"handwriting": True}, "handwriting"),
+    ({"uncertain": True}, "uncertain"),
+    ({"text": "a [?] b [?] c [?]"}, "unclear"),
+    ({"text": "a [?] b [?]"}, None),
+    ({"finish_reason": "length"}, "truncated"),
+])
+def test_escalation_reason(kwargs, expected):
+    assert escalation_reason(_reply(**kwargs), unclear_max=2) == expected
+
+
+def test_call_llm_against_real_sdk_request_shape():
+    """Contract test: the real openrouter SDK serializes our request and parses a reply."""
+    openrouter = pytest.importorskip("openrouter")
+    import httpx
+
+    captured = {}
+
+    def handler(request):
+        captured["body"] = _json.loads(request.content)
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={
+            "id": "gen-1", "created": 1, "object": "chat.completion", "system_fingerprint": None,
+            "model": "google/gemini-3.1-flash-lite",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant",
+                "content": _json.dumps({"text": "Hallo", "handwriting": True, "uncertain": False}),
+            }}],
+            "usage": {"prompt_tokens": 1500, "completion_tokens": 12, "total_tokens": 1512, "cost": 0.0004},
+        })
+
+    client = openrouter.OpenRouter(api_key="sk-test",
+                                   client=httpx.Client(transport=httpx.MockTransport(handler)))
+    settings = _llm_settings(ocr_llm_fallback_models=["openai/gpt-5-mini"])
+    reply = call_llm(client, b"img", "google/gemini-3.1-flash-lite", 4000, settings)
+
+    body = captured["body"]
+    assert captured["auth"] == "Bearer sk-test"
+    assert body["provider"] == {"data_collection": "deny"}
+    assert body["models"] == ["google/gemini-3.1-flash-lite", "openai/gpt-5-mini"]
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["messages"][0]["content"][1]["type"] == "image_url"
+    assert (reply.text, reply.handwriting, reply.cost) == ("Hallo", True, 0.0004)
