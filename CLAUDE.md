@@ -74,7 +74,7 @@ When `ENABLE_AI_METADATA=true`, the first ~3000 chars of OCR text are sent to an
 
 ### Output destinations (`ocr-api/app/outputs/`)
 
-All `deliver_*()` functions are async, return a dict merged into job status, and are launched concurrently via `asyncio.gather()`. Enabled by `ENABLE_FILESYSTEM`, `ENABLE_PAPERLESS`, `ENABLE_RCLONE`, `ENABLE_MAIL`.
+All `deliver_*()` functions are async, return a dict merged into job status, and are launched concurrently via `asyncio.gather()`. Enabled by `ENABLE_FILESYSTEM`, `ENABLE_PAPERLESS`, `ENABLE_RCLONE`, `ENABLE_MAIL`. Exception: with `RCLONE_MAIL_LINK=true` the mail task (`_deliver_mail_with_link` in `worker.py`) awaits the rclone task so it can include the share link; `rclone link` is always called with `--expire` (`RCLONE_LINK_EXPIRE_DAYS`, validated 1–30), and on any rclone failure the mail goes out without a link.
 
 ### Configuration (`ocr-api/app/config.py`)
 
@@ -92,6 +92,7 @@ Pydantic `Settings` loaded from `.env`. `get_settings()` is `lru_cache`-wrapped 
 - `tests/test_worker.py` — worker queue and job lifecycle
 - `tests/test_ai_metadata.py` — prompt building and JSON parsing
 - `tests/test_paperless.py` — Paperless delivery and entity lookup
+- `tests/test_rclone.py` / `tests/test_mail.py` — rclone upload + expiring share link; mail body
 - `tests/test_compare_ocr_models.py` — CER + comparison script (mocked client)
 
 ## Docker smoke test
