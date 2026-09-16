@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     # Output token budgets; reasoning tokens count toward them. The cheap pass
     # normally needs < 800 tokens, so a small cap cuts a repetition loop off after
     # seconds (it then escalates as truncated). Strong/line+box replies need up to
-    # ~6k on dense table pages.
+    # ~6.2k on dense table pages; 8000 leaves headroom while a degenerate loop
+    # (gemini   runaway) falls back after ~45 s instead of ~95 s.
     ocr_llm_max_tokens: int = 3000
-    ocr_llm_strong_max_tokens: int = 16000
+    ocr_llm_strong_max_tokens: int = 8000
     ocr_llm_image_max_side: int = 2000
     ocr_llm_escalate_unclear_max: int = 2
     # OpenRouter reasoning effort per tier ("" = provider default, no `reasoning` sent).

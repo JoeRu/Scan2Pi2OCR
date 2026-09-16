@@ -372,7 +372,7 @@ def test_config_ocr_llm_defaults():
     assert s.ocr_llm_concurrency == 3
     assert s.ocr_llm_timeout == 90
     assert s.ocr_llm_max_tokens == 3000
-    assert s.ocr_llm_strong_max_tokens == 16000
+    assert s.ocr_llm_strong_max_tokens == 8000
     assert s.ocr_llm_image_max_side == 2000
     assert s.ocr_llm_escalate_unclear_max == 2
     assert s.ocr_llm_reasoning_effort == ""
@@ -576,6 +576,44 @@ def test_call_llm_retries_once_then_succeeds():
     assert reply.text == "ok"
     assert client.chat.send.call_count == 2
     sleep.assert_called_once_with(2.0)
+
+
+def test_call_llm_retries_once_on_provider_error_finish():
+    # Real scan 2026-09-16: OpenRouter returned finish_reason="error" with 0 output tokens
+    # and an error message as content after 3 s.
+    client = MagicMock()
+    client.chat.send.side_effect = [
+        _llm_result(finish_reason="error", content="Provider returned error"),
+        _llm_result(text="ok"),
+    ]
+    with patch("app.ocr_backends.openrouter.time.sleep") as sleep:
+        reply = call_llm(client, b"img", "m", 100, _llm_settings())
+    assert reply.text == "ok"
+    assert client.chat.send.call_count == 2
+    sleep.assert_called_once_with(2.0)
+
+
+def test_call_llm_never_uses_provider_error_content_as_transcript():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(finish_reason="error", content="Provider returned error")
+    with patch("app.ocr_backends.openrouter.time.sleep"):
+        with pytest.raises(ValueError, match="finish_reason=error"):
+            call_llm(client, b"img", "m", 100, _llm_settings())
+    assert client.chat.send.call_count == 2
+
+
+def test_call_llm_lines_retries_once_on_provider_error_finish():
+    client = MagicMock()
+    client.chat.send.side_effect = [
+        _llm_result(finish_reason="error", content="Provider returned error"),
+        _llm_result(content=_json.dumps({"lines": [
+            {"text": "Hallo", "box_2d": [0, 0, 100, 100], "handwritten": True}]})),
+    ]
+    with patch("app.ocr_backends.openrouter.time.sleep"):
+        _, lines, flags = orb.call_llm_lines(client, b"img", "m", 100, _llm_settings(), "",
+                                             width_px=100, height_px=100)
+    assert [l.text for l in lines] == ["Hallo"] and flags == [True]
+    assert client.chat.send.call_count == 2
 
 
 def test_call_llm_raises_after_second_failure():
@@ -828,7 +866,7 @@ def test_openrouter_run_escalates_handwriting_to_strong_model(tmp_path):
     assert page.escalated is True
     second = client.chat.send.call_args_list[1].kwargs
     assert second["model"] == "google/gemini-3.1-pro-preview"
-    assert second["max_tokens"] == 16000
+    assert second["max_tokens"] == 8000
     # cheap first pass has its own, much smaller budget: its normal output is < 800
     # tokens, so a repetition loop is cut off after seconds instead of 8k tokens
     assert client.chat.send.call_args_list[0].kwargs["max_tokens"] == 3000

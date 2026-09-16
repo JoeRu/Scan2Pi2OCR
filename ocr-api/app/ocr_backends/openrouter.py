@@ -247,17 +247,30 @@ def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settin
     return _reply_from(result, model, latency, text, handwriting, uncertain)
 
 
+def _send_once(client, request: dict, model: str, timeout_ms: int):
+    result = client.chat.send(**request, timeout_ms=timeout_ms)
+    if result.choices and result.choices[0].finish_reason == "error":
+        # Provider-side failure delivered as a normal reply (0 output tokens, error text as
+        # content): never let that content become a transcript.
+        content = _content_text(result.choices[0].message.content)
+        raise ValueError(f"{model} returned finish_reason=error: {content[:120]!r}")
+    return result
+
+
 def _send(client, request: dict, model: str, settings: Settings):
-    """chat.send, retried once after _RETRY_DELAY_S. Returns (result, latency_s)."""
+    """chat.send, retried once after _RETRY_DELAY_S on an exception or finish_reason=error.
+
+    Returns (result, latency_s).
+    """
     timeout_ms = settings.ocr_llm_timeout * 1000
     start = time.monotonic()
     try:
-        result = client.chat.send(**request, timeout_ms=timeout_ms)
+        result = _send_once(client, request, model, timeout_ms)
     except Exception as exc:
         logger.info("OpenRouter request to %s failed (%s: %s), retrying once",
                     model, type(exc).__name__, exc)
         time.sleep(_RETRY_DELAY_S)
-        result = client.chat.send(**request, timeout_ms=timeout_ms)
+        result = _send_once(client, request, model, timeout_ms)
     return result, time.monotonic() - start
 
 

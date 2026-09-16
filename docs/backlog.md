@@ -54,6 +54,12 @@ transcript passed from `process_scan()` to `deliver_paperless()`.
 
 **Value:** Medium. Deferred in the 2026-09-16 LLM OCR design.
 
+**Status:** Addressed differently (2026-09-16): `OCR_LLM_PDF_TEXT=positioned`
+puts the LLM lines (with Gemini boxes, hybrid with Tesseract for printed lines)
+into the PDF text layer itself, so Paperless indexes handwriting without an API
+PATCH; `block` is the unpositioned variant. The PATCH idea is only still needed
+for documents that have no PDF text layer.
+
 ## Remove PaddleOCR from the image
 
 **Problem:** Once `OCR_ENGINE=openrouter` is the production default, `paddleocr`,
