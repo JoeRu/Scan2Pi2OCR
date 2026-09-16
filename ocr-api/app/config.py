@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +16,10 @@ class Settings(BaseSettings):
 
     enable_rclone: bool = False
     rclone_target: str = "OneDrive_Joe:scanner/"
+    # Put an anonymous view link to the uploaded PDF into the mail. The link always
+    # expires: rclone is called with --expire, and without expiry no link is sent.
+    rclone_mail_link: bool = False
+    rclone_link_expire_days: int = Field(default=30, ge=1, le=30)
 
     enable_filesystem: bool = False
     output_dir: str = "/ocr-api/output"

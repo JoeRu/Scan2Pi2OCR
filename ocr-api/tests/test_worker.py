@@ -341,3 +341,74 @@ async def test_process_job_status_with_errors_includes_ocr_pages(tmp_path):
     status = worker_mod._status["jp2"]
     assert status["status"] == "done_with_errors"
     assert status["outputs"]["ocr_pages"] == ocr_pages
+
+
+# ---------------------------------------------------------------------------
+# OneDrive link in mail (RCLONE_MAIL_LINK)
+# ---------------------------------------------------------------------------
+
+async def _run_rclone_and_mail(tmp_path, job_id, settings, rclone_mock):
+    ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt")}
+    mail = AsyncMock(return_value={"mail": {"status": "ok"}})
+    with patch("app.worker.get_settings", return_value=settings), \
+         patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
+         patch("app.worker.deliver_rclone", rclone_mock), \
+         patch("app.worker.deliver_mail", mail), \
+         patch("shutil.rmtree"):
+        await _process_job(job_id, str(tmp_path), "scan_001", _now())
+    return mail
+
+
+def _link_settings(**kwargs):
+    return _make_settings(enable_rclone=True, enable_mail=True, mail_to="me@example.com",
+                          rclone_mail_link=True, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_mail_waits_for_rclone_and_gets_link(tmp_path):
+    uploaded = asyncio.Event()
+
+    async def slow_rclone(pdf_path, file_name):
+        await asyncio.sleep(0.05)
+        uploaded.set()
+        return {"rclone": {"status": "ok", "dest": "r:doc.pdf",
+                           "link": "https://1drv.ms/b/x", "link_expires": "2026-10-16T20:00:00+02:00"}}
+
+    async def mail_side_effect(*args, **kwargs):
+        assert uploaded.is_set(), "mail sent before the rclone upload finished"
+        return {"mail": {"status": "ok"}}
+
+    rclone = AsyncMock(side_effect=slow_rclone)
+    ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt")}
+    mail = AsyncMock(side_effect=mail_side_effect)
+    with patch("app.worker.get_settings", return_value=_link_settings()), \
+         patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
+         patch("app.worker.deliver_rclone", rclone), \
+         patch("app.worker.deliver_mail", mail), \
+         patch("shutil.rmtree"):
+        await _process_job("jl1", str(tmp_path), "scan_001", _now())
+
+    assert worker_mod._status["jl1"]["status"] == "done"
+    assert mail.call_args.kwargs["onedrive_link"] == "https://1drv.ms/b/x"
+    assert mail.call_args.kwargs["link_expires"] == "2026-10-16T20:00:00+02:00"
+
+
+@pytest.mark.asyncio
+async def test_mail_still_sent_without_link_when_rclone_fails(tmp_path):
+    rclone = AsyncMock(side_effect=RuntimeError("rclone failed: auth"))
+    mail = await _run_rclone_and_mail(tmp_path, "jl2", _link_settings(), rclone)
+
+    status = worker_mod._status["jl2"]
+    assert status["status"] == "done_with_errors"
+    assert list(status["errors"]) == ["rclone"]
+    mail.assert_awaited_once()
+    assert mail.call_args.kwargs["onedrive_link"] is None
+
+
+@pytest.mark.asyncio
+async def test_mail_has_no_link_when_setting_disabled(tmp_path):
+    rclone = AsyncMock(return_value={"rclone": {"status": "ok", "dest": "r:doc.pdf"}})
+    settings = _make_settings(enable_rclone=True, enable_mail=True, mail_to="me@example.com")
+    mail = await _run_rclone_and_mail(tmp_path, "jl3", settings, rclone)
+
+    assert mail.call_args.kwargs.get("onedrive_link") is None

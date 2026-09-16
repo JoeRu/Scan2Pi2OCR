@@ -108,6 +108,8 @@ Enable one or more simultaneously:
 | `ENABLE_RCLONE` | `false` | Upload to cloud via rclone |
 | `RCLONE_TARGET` | `OneDrive:scanner/` | rclone remote:path |
 | `RCLONE_CONFIG_DIR` | `./rclone` | Host directory containing rclone.conf (mounted read-write, owned by uid 101) |
+| `RCLONE_MAIL_LINK` | `false` | Add an anonymous view link to the uploaded PDF to the mail (the mail waits for the upload) |
+| `RCLONE_LINK_EXPIRE_DAYS` | `30` | Link lifetime in days, 1–30; without a working expiry no link is sent |
 | `ENABLE_MAIL` | `false` | Send e-mail notification with OCR text preview |
 | `MAIL_TO` | `you@example.com` | Recipient address |
 | `SMTP_HOST` | `smtp.example.com` | SMTP server |

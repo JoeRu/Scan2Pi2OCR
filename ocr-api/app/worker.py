@@ -52,6 +52,20 @@ async def _fetch_paperless_document_types(settings) -> list[str] | None:
         return None
 
 
+async def _deliver_mail_with_link(pdf_path: str, file_name: str, txt_path: str,
+                                  rclone_task: asyncio.Future | None) -> dict:
+    """Send the mail after the rclone upload so it can carry the share link.
+    An rclone failure is recorded by the rclone task itself; the mail goes out without link."""
+    link = expires = None
+    if rclone_task is not None:
+        try:
+            rclone = (await rclone_task)["rclone"]
+            link, expires = rclone.get("link"), rclone.get("link_expires")
+        except Exception:
+            pass
+    return await deliver_mail(pdf_path, file_name, txt_path, onedrive_link=link, link_expires=expires)
+
+
 async def _process_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp: datetime) -> None:
     settings = get_settings()
     logger.info("Job started: job_id=%s name=%r", job_id, file_name)
@@ -90,11 +104,14 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp
         if settings.enable_paperless:
             tasks.append(deliver_paperless(pdf_path, file_name, ai_meta if settings.enable_ai_metadata else None))
             task_names.append("paperless")
+        rclone_task = None
         if settings.enable_rclone:
-            tasks.append(deliver_rclone(pdf_path, file_name))
+            rclone_task = asyncio.ensure_future(deliver_rclone(pdf_path, file_name))
+            tasks.append(rclone_task)
             task_names.append("rclone")
         if settings.enable_mail and settings.mail_to:
-            tasks.append(deliver_mail(pdf_path, file_name, txt_path))
+            link_task = rclone_task if settings.rclone_mail_link else None
+            tasks.append(_deliver_mail_with_link(pdf_path, file_name, txt_path, link_task))
             task_names.append("mail")
 
         if tasks:
