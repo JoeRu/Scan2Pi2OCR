@@ -58,7 +58,7 @@ GET /scan/status/{job_id}
 
 ### Pluggable OCR backends (`ocr-api/app/ocr_backends/`)
 
-- `base.py` — `OcrBackend` Protocol: `run(pages: list[Path], language: str) -> str`
+- `base.py` — `OcrBackend` Protocol: `run(pages: list[Path], language: str) -> list[OcrPage]`
 - `tesseract.py` — wraps Tesseract CLI subprocess, reads `_ocr_out.txt`
 - `paddleocr.py` — PaddleOCR Python API (lazy import; `try/except ImportError` at module level for mockability). PaddleOCR's detector is capped via `PADDLE_DET_LIMIT_TYPE` (default `max`) and `PADDLE_DET_LIMIT_SIDE_LEN` (default `1600`); without the cap a 300 dpi A4 scan OOM-kills the process (PaddleOCR#17955).
 - `gcv.py` — Google Cloud Vision stub (raises `NotImplementedError`)
@@ -66,9 +66,7 @@ GET /scan/status/{job_id}
 - `build_pdf.py` — `build_searchable_pdf()` creates PDFs via `fpdf2`: TIF images as pages + invisible white text layer for Ctrl+F searchability
 - `__init__.py` — `get_backend(engine: str)` factory with lazy per-branch imports
 
-Switch engine via `OCR_ENGINE=paddleocr` (env var). Default: `tesseract`. Valid values are enforced by `Literal["tesseract", "paddleocr", "gcv", "openrouter"]` in config.
-
-**Known limitation:** all OCR text goes on page 1 of multi-page PDFs. Per-page placement requires `OcrBackend.run()` to return `list[str]` instead of `str`.
+Switch engine via `OCR_ENGINE` (env var, e.g. `openrouter`). Default: `tesseract`. Valid values are enforced by `Literal["tesseract", "paddleocr", "gcv", "openrouter"]` in config.
 
 ### AI metadata (`ocr-api/app/ai_metadata.py`)
 
@@ -95,8 +93,6 @@ Pydantic `Settings` loaded from `.env`. `get_settings()` is `lru_cache`-wrapped 
 - `tests/test_ai_metadata.py` — prompt building and JSON parsing
 - `tests/test_paperless.py` — Paperless delivery and entity lookup
 - `tests/test_compare_ocr_models.py` — CER + comparison script (mocked client)
-
-Two tests in `test_paperless.py` are pre-existing failures unrelated to the OCR backend work.
 
 ## Docker smoke test
 
