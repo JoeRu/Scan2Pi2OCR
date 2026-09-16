@@ -10,7 +10,7 @@ logger = logging.getLogger("app.outputs.rclone")
 async def deliver_rclone(pdf_path: str, file_name: str) -> dict:
     """Upload PDF to rclone remote."""
     settings = get_settings()
-    dest = f"{settings.rclone_target}/{file_name}.pdf"
+    dest = f"{settings.rclone_target.rstrip('/')}/{file_name}.pdf"
     logger.info("Uploading via rclone: %s -> %s", pdf_path, dest)
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _rclone_copy, pdf_path, dest)
@@ -20,7 +20,7 @@ async def deliver_rclone(pdf_path: str, file_name: str) -> dict:
 
 def _rclone_copy(src: str, dest: str) -> None:
     result = subprocess.run(
-        ["rclone", "copy", src, dest],
+        ["rclone", "copyto", src, dest],
         capture_output=True, text=True,
     )
     if result.returncode != 0:

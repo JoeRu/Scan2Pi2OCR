@@ -54,6 +54,27 @@ def test_upload_returns_job_id(client, tmp_path):
     assert body["status"] == "queued"
 
 
+def test_upload_scan_timestamp_uses_local_timezone(client, tmp_path, monkeypatch):
+    """File names are built from scan_timestamp, so it must be local time, not UTC."""
+    import time
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        tif = tmp_path / "scan_001.pnm.tif"
+        tif.write_bytes(b"FAKE")
+        with patch("app.main.enqueue_job", new_callable=AsyncMock) as enqueue:
+            client.post(
+                "/scan/upload",
+                headers={"x-api-key": "test-key"},
+                files=[("files", ("scan_001.pnm.tif", tif.open("rb"), "image/tiff"))],
+            )
+        scan_timestamp = enqueue.call_args.args[3]
+        assert scan_timestamp.utcoffset().total_seconds() in (3600, 7200)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_status_returns_queued(client):
     """A job that was queued shows 'queued' status."""
     import app.worker as worker_mod

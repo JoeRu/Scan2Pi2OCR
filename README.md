@@ -107,7 +107,7 @@ Enable one or more simultaneously:
 | `PAPERLESS_TOKEN` | `abc123...` | Paperless API token |
 | `ENABLE_RCLONE` | `false` | Upload to cloud via rclone |
 | `RCLONE_TARGET` | `OneDrive:scanner/` | rclone remote:path |
-| `RCLONE_CONFIG_PATH` | `/root/.config/rclone/rclone.conf` | Host path to rclone.conf (mounted read-only) |
+| `RCLONE_CONFIG_DIR` | `./rclone` | Host directory containing rclone.conf (mounted read-write, owned by uid 101) |
 | `ENABLE_MAIL` | `false` | Send e-mail notification with OCR text preview |
 | `MAIL_TO` | `you@example.com` | Recipient address |
 | `SMTP_HOST` | `smtp.example.com` | SMTP server |
@@ -188,13 +188,17 @@ curl http://localhost:9000/scan/status/550e8400-... \
 
 ## rclone setup (without a local rclone installation)
 
-The `rclone.conf` is mounted read-only into the container via `RCLONE_CONFIG_PATH`.
+The directory holding `rclone.conf` is mounted read-write into the container via `RCLONE_CONFIG_DIR`
+(default `./rclone`). It must be a directory, not a single-file mount, and writable by the container
+user (uid 101) — rclone rewrites the config whenever it refreshes the OneDrive OAuth token; if it
+can't, the stored refresh token eventually expires and uploads fail.
 
 ### Option 1 – Copy an existing config from another machine
 
 ```bash
-scp ~/.config/rclone/rclone.conf user@server:/root/.config/rclone/rclone.conf
-# Ensure RCLONE_CONFIG_PATH in .env matches the destination path
+scp ~/.config/rclone/rclone.conf user@server:/path/to/Scan2Pi2OCR/rclone/rclone.conf
+# On the server:
+chown -R 101:102 rclone && chmod 700 rclone && chmod 600 rclone/rclone.conf
 ```
 
 ### Option 2 – Headless OAuth (OneDrive)
