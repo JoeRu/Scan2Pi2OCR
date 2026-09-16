@@ -258,11 +258,17 @@ class OpenRouterBackend:
             return result
 
         start = time.monotonic()
-        with ThreadPoolExecutor(max_workers=max(1, settings.ocr_llm_concurrency)) as pool:
-            outcomes = list(pool.map(
-                lambda item: self._transcribe(client, settings, item[0], item[1]),
-                enumerate(pages),
-            ))
+        # `with client:` (not `with _client(settings) as client:`) so `client`
+        # keeps referring to the object _client() returned: a MagicMock's
+        # __enter__() auto-generates a different MagicMock unless configured,
+        # which would otherwise silently detach `_transcribe`'s calls from the
+        # object tests assert on.
+        with client:
+            with ThreadPoolExecutor(max_workers=max(1, settings.ocr_llm_concurrency)) as pool:
+                outcomes = list(pool.map(
+                    lambda item: self._transcribe(client, settings, item[0], item[1]),
+                    enumerate(pages),
+                ))
 
         for ocr_page, outcome in zip(result, outcomes):
             if outcome is None:

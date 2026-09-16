@@ -64,6 +64,7 @@ def compare(images: list[Path], models: list[str], truths: list[Path], out_dir: 
                 cost=reply.cost,
                 handwriting=reply.handwriting,
                 uncertain=reply.uncertain,
+                finish_reason=reply.finish_reason,
                 cer=cer(reply.text, truth) if truth is not None else None,
             )
             rows.append(row)
@@ -72,7 +73,7 @@ def compare(images: list[Path], models: list[str], truths: list[Path], out_dir: 
 
 def format_table(rows: list[dict]) -> str:
     header = (f"{'page':<24} {'model':<40} {'time':>7} {'tokens in/out':>13} "
-              f"{'cost':>9} {'hw':>3} {'unc':>3} {'CER':>6}")
+              f"{'cost':>9} {'hw':>3} {'unc':>3} {'fin':>8} {'CER':>6}")
     lines = [header, "-" * len(header)]
     for r in rows:
         if "error" in r:
@@ -83,7 +84,7 @@ def format_table(rows: list[dict]) -> str:
         lines.append(
             f"{r['page']:<24} {r['model']:<40} {r['latency_s']:>6.1f}s {tokens:>13} "
             f"${r['cost']:>8.4f} {'y' if r['handwriting'] else 'n':>3} "
-            f"{'y' if r['uncertain'] else 'n':>3} {cer_s:>6}"
+            f"{'y' if r['uncertain'] else 'n':>3} {str(r['finish_reason']):>8} {cer_s:>6}"
         )
     return "\n".join(lines)
 
@@ -104,7 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         print("OPENROUTER_API_KEY is not set", file=sys.stderr)
         return 2
     models = [m.strip() for m in args.models.split(",") if m.strip()]
-    rows = compare(args.images, models, args.truth, args.out, settings, _client(settings))
+    client = _client(settings)
+    with client:  # not `with _client(settings) as client:` -- see openrouter.py
+        rows = compare(args.images, models, args.truth, args.out, settings, client)
     print(format_table(rows))
     print(f"\nTranscripts written to {args.out}/")
     return 0

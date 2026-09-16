@@ -55,6 +55,7 @@ def test_compare_writes_transcripts_and_rows(tmp_path):
     assert rows[0]["model"] == "good/model"
     assert rows[0]["cer"] == 0.0
     assert rows[0]["cost"] == 0.0001
+    assert rows[0]["finish_reason"] == "stop"  # M3: provenance for picking a model
     assert "error" in rows[1]
     assert (tmp_path / "out" / "page1__good_model.txt").read_text(encoding="utf-8") == "Hallo Welt"
     # each model is measured on its own: no OpenRouter fallback list
@@ -62,6 +63,7 @@ def test_compare_writes_transcripts_and_rows(tmp_path):
     table = format_table(rows)
     assert "good/model" in table
     assert "ERROR" in table
+    assert "stop" in table
 
 
 def test_main_requires_api_key(tmp_path):
@@ -73,3 +75,20 @@ def test_main_requires_api_key(tmp_path):
 def test_main_truth_count_mismatch_exits():
     with pytest.raises(SystemExit):
         main(["a.png", "b.png", "--models", "m", "--truth", "a.txt"])
+
+
+def test_main_closes_client_after_use(tmp_path):
+    """M4: main() uses the client as a context manager, and hands compare() the
+    same client object `_client()` returned (not __enter__'s return value)."""
+    img = tmp_path / "page1.png"
+    Image.new("RGB", (50, 50), (255, 255, 255)).save(img)
+    settings = Settings(api_key="test", openrouter_api_key="sk")
+    client = MagicMock()
+    with patch("scripts.compare_ocr_models.get_settings", return_value=settings), \
+         patch("scripts.compare_ocr_models._client", return_value=client), \
+         patch("scripts.compare_ocr_models.compare", return_value=[]) as mock_compare:
+        assert main([str(img), "--models", "m", "--out", str(tmp_path / "out")]) == 0
+    client.__enter__.assert_called_once()
+    client.__exit__.assert_called_once()
+    mock_compare.assert_called_once()
+    assert mock_compare.call_args.args[-1] is client

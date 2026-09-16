@@ -839,6 +839,19 @@ def test_openrouter_run_invalid_json_uses_raw_text_without_escalation(tmp_path):
     assert result[0].escalated is False
 
 
+def test_openrouter_run_closes_client_after_use(tmp_path):
+    """M4: the client is used as a context manager (closed after the pool
+    finishes). `_transcribe`'s calls must land on the same object `_client()`
+    returned, not on `__enter__`'s return value -- a MagicMock's `__enter__`
+    auto-generates a *different* MagicMock unless configured, which would
+    silently stop `client.chat.send` from being observed."""
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result(text="LLM Text")])
+    client.__enter__.assert_called_once()
+    client.__exit__.assert_called_once()
+    assert client.chat.send.call_count == 1
+    assert result[0].transcript == "LLM Text"
+
+
 def test_openrouter_run_truncated_recoverable_cheap_escalates(tmp_path):
     """I1: cheap reply cut off by finish_reason=="length" but its "text" value is
     still recoverable -> that recovered text is used and escalation still fires."""
