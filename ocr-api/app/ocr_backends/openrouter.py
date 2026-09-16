@@ -67,21 +67,74 @@ def prepare_image(path: Path, max_side: int) -> bytes:
     return buf.getvalue()
 
 
+def _as_bool_flag(value) -> bool:
+    """True only for the JSON boolean `true` or a case-insensitive "true" string.
+
+    Guards against `bool("false")` (a non-empty string) being truthy: an LLM
+    that replies with the string "false" instead of the JSON literal must not
+    be read as handwriting=True/uncertain=True (M1).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
+def _load_json_content(content: str) -> object | None:
+    """Parse `content` (optionally fenced in ```json ... ```) as JSON, or None."""
+    stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_reply(content: str) -> tuple[str, bool, bool]:
     """Return (text, handwriting, uncertain); non-JSON content is used as raw text."""
     raw = (content or "").strip()
-    stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
-    try:
-        data = json.loads(stripped)
-    except json.JSONDecodeError:
+    data = _load_json_content(raw)
+    if data is None:
         return raw, False, False
+    if isinstance(data, str):
+        # A bare JSON string (e.g. `"Hallo"`): use its value, not the raw
+        # content (which would otherwise include the surrounding quotes; M2).
+        return data.strip(), False, False
     if not isinstance(data, dict):
         return raw, False, False
     return (
         str(data.get("text") or "").strip(),
-        bool(data.get("handwriting")),
-        bool(data.get("uncertain")),
+        _as_bool_flag(data.get("handwriting")),
+        _as_bool_flag(data.get("uncertain")),
     )
+
+
+_TRUNCATED_TEXT_FIELD_RE = re.compile(r'"text"\s*:\s*"')
+
+
+def recover_truncated_text(content: str) -> str | None:
+    """Best-effort recovery of the "text" value from JSON cut off mid-string by
+    `finish_reason == "length"` (e.g. `{"text": "Sehr geehrte\\nDamen...`).
+
+    Locates the start of the "text" value and decodes everything after it as a
+    JSON string, trimming back over an incomplete trailing escape sequence (a
+    lone backslash, or a cut-off `\\uXXXX`) until it decodes. Returns None if
+    nothing usable can be recovered.
+    """
+    match = _TRUNCATED_TEXT_FIELD_RE.search(content or "")
+    if not match:
+        return None
+    fragment = content[match.end():]
+    while True:
+        try:
+            text = json.loads('"' + fragment + '"')
+        except json.JSONDecodeError:
+            if not fragment:
+                return None
+            fragment = fragment[:-1]
+            continue
+        text = text.strip()
+        return text or None
 
 
 def build_request(image: bytes, model: str, max_tokens: int, fallback_models: list[str]) -> dict:
@@ -129,7 +182,18 @@ def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settin
     latency = time.monotonic() - start
 
     choice = result.choices[0]
-    text, handwriting, uncertain = parse_reply(_content_text(choice.message.content))
+    content = _content_text(choice.message.content)
+    raw = (content or "").strip()
+    if choice.finish_reason == "length" and _load_json_content(raw) is None:
+        # json_object mode cut off mid-string: the raw content is unusable as a
+        # transcript verbatim (it's the JSON wrapper plus escape sequences, not
+        # prose). Recover just the "text" value instead of storing that (I1).
+        recovered = recover_truncated_text(raw)
+        if not recovered:
+            raise ValueError(f"truncated, unrecoverable JSON from {model}")
+        text, handwriting, uncertain = recovered, False, False
+    else:
+        text, handwriting, uncertain = parse_reply(content)
     if not text:
         raise ValueError(f"empty transcription from {model}")
     usage = result.usage

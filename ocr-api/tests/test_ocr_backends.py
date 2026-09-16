@@ -462,6 +462,31 @@ def test_parse_reply_empty():
     assert parse_reply("") == ("", False, False)
 
 
+# M1: only JSON `true` / case-insensitive string "true" count as True.
+def test_parse_reply_string_false_is_not_truthy():
+    content = '{"text": "Hallo", "handwriting": "false", "uncertain": "false"}'
+    assert parse_reply(content) == ("Hallo", False, False)
+
+
+def test_parse_reply_string_true_is_truthy():
+    content = '{"text": "Hallo", "handwriting": "True", "uncertain": "TRUE"}'
+    assert parse_reply(content) == ("Hallo", True, True)
+
+
+# M2: a JSON value that parses but isn't an object (e.g. a bare string) should
+# use that string as the text, not the raw content (incl. quotes).
+def test_parse_reply_json_string_uses_value_as_text():
+    assert parse_reply('"Hallo"') == ("Hallo", False, False)
+
+
+def test_parse_reply_json_number_keeps_raw_behavior():
+    assert parse_reply("42") == ("42", False, False)
+
+
+def test_parse_reply_json_list_keeps_raw_behavior():
+    assert parse_reply('["a", "b"]') == ('["a", "b"]', False, False)
+
+
 def test_build_request_shape():
     image = b"\xff\xd8img"
     req = build_request(image, "google/gemini-3.1-flash-lite", 4000, ["openai/gpt-5-mini"])
@@ -528,6 +553,68 @@ def test_call_llm_empty_text_raises_without_retry():
     with pytest.raises(ValueError, match="empty"):
         call_llm(client, b"img", "m", 100, _llm_settings())
     assert client.chat.send.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# I1: recover the "text" value out of JSON truncated by finish_reason=="length"
+# ---------------------------------------------------------------------------
+from app.ocr_backends.openrouter import recover_truncated_text
+
+
+def test_recover_truncated_text_simple():
+    content = '{"text": "Sehr geehrte Damen und Herren'
+    assert recover_truncated_text(content) == "Sehr geehrte Damen und Herren"
+
+
+def test_recover_truncated_text_decodes_escape_sequences():
+    content = '{"text": "Sehr geehrte\\nDamen, Gr\\u00fc\\u00dfe'
+    assert recover_truncated_text(content) == "Sehr geehrte\nDamen, Grüße"
+
+
+def test_recover_truncated_text_handles_dangling_trailing_backslash():
+    content = '{"text": "Sehr geehrte\\'
+    assert recover_truncated_text(content) == "Sehr geehrte"
+
+
+def test_recover_truncated_text_handles_incomplete_unicode_escape():
+    content = '{"text": "Gr\\u00'
+    assert recover_truncated_text(content) == "Gr"
+
+
+def test_recover_truncated_text_unrecoverable_returns_none():
+    assert recover_truncated_text("not json at all, no text field") is None
+
+
+def test_recover_truncated_text_empty_recovered_text_returns_none():
+    assert recover_truncated_text('{"text": "') is None
+
+
+def test_call_llm_truncated_recoverable_json_uses_recovered_text():
+    client = MagicMock()
+    content = '{"text": "Sehr geehrte Damen und Herren'  # cut off mid-string
+    client.chat.send.return_value = _llm_result(content=content, finish_reason="length")
+    reply = call_llm(client, b"img", "m", 100, _llm_settings())
+    assert reply.text == "Sehr geehrte Damen und Herren"
+    assert reply.handwriting is False
+    assert reply.uncertain is False
+    assert reply.finish_reason == "length"  # escalation still triggers on this
+
+
+def test_call_llm_truncated_unrecoverable_json_raises():
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(content="garbled, no text field",
+                                                 finish_reason="length")
+    with pytest.raises(ValueError, match="truncated"):
+        call_llm(client, b"img", "m", 100, _llm_settings())
+
+
+def test_call_llm_non_length_non_json_still_uses_raw_text():
+    """Complete (non-truncated) non-JSON replies keep the existing raw-text behavior."""
+    client = MagicMock()
+    client.chat.send.return_value = _llm_result(content="Sehr geehrte Damen und Herren",
+                                                 finish_reason="stop")
+    reply = call_llm(client, b"img", "m", 100, _llm_settings())
+    assert reply.text == "Sehr geehrte Damen und Herren"
 
 
 @pytest.mark.parametrize("kwargs,expected", [
@@ -749,6 +836,34 @@ def test_openrouter_run_invalid_json_uses_raw_text_without_escalation(tmp_path):
     result, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result(content="Rohtext ohne JSON")])
     assert client.chat.send.call_count == 1
     assert result[0].transcript == "Rohtext ohne JSON"
+    assert result[0].escalated is False
+
+
+def test_openrouter_run_truncated_recoverable_cheap_escalates(tmp_path):
+    """I1: cheap reply cut off by finish_reason=="length" but its "text" value is
+    still recoverable -> that recovered text is used and escalation still fires."""
+    send = [
+        _llm_result(content='{"text": "cheap text cut off', finish_reason="length"),
+        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+    ]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    assert client.chat.send.call_count == 2
+    assert result[0].transcript == "strong"
+    assert result[0].transcript_model == "google/gemini-3.5-flash"
+    assert result[0].escalated is True
+
+
+def test_openrouter_run_truncated_unrecoverable_strong_keeps_cheap_result(tmp_path):
+    """I1: if the strong model's reply is also truncated and unrecoverable, the
+    cheap result is kept rather than storing garbage."""
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _llm_result(content="garbled, no text field", finish_reason="length"),
+    ]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    assert client.chat.send.call_count == 2
+    assert result[0].transcript == "cheap"
+    assert result[0].transcript_model == "google/gemini-3.1-flash-lite"
     assert result[0].escalated is False
 
 
