@@ -21,6 +21,16 @@ _FONT_CANDIDATES = (
 _UNICODE_FONT = "DejaVu"
 
 
+# Font size of the invisible transcript block (OcrPage.pdf_text == "block").
+_BLOCK_FONT_PT = 4
+
+
+def _pdf_safe(text: str, text_font: str) -> str:
+    if text_font == "Helvetica":
+        return text.encode("latin-1", "replace").decode("latin-1")
+    return text
+
+
 def _find_unicode_font() -> str | None:
     for path in _FONT_CANDIDATES:
         if Path(path).is_file():
@@ -72,10 +82,15 @@ def build_searchable_pdf(pages: list[Path], pages_ocr: list[OcrPage], output_pat
                 pdf.set_font_size(max(line_h_px / dpi_y * 72, 1))
                 x_mm = line.x0 / dpi_x * 25.4
                 baseline_mm = (line.y0 + 0.8 * line_h_px) / dpi_y * 25.4
-                text = line.text
-                if text_font == "Helvetica":
-                    text = text.encode("latin-1", "replace").decode("latin-1")
-                pdf.text(x_mm, baseline_mm, text)
+                pdf.text(x_mm, baseline_mm, _pdf_safe(line.text, text_font))
+
+            if ocr_page.pdf_text == "block" and ocr_page.transcript:
+                # Unpositioned: searchable (PDF viewers, Paperless) but highlights
+                # land in the top-left corner, not on the handwriting.
+                pdf.set_font_size(_BLOCK_FONT_PT)
+                step_mm = _BLOCK_FONT_PT / 72 * 25.4
+                for n, text in enumerate(t for t in ocr_page.transcript.splitlines() if t.strip()):
+                    pdf.text(2, 2 + (n + 1) * step_mm, _pdf_safe(text, text_font))
 
     pdf.output(str(output_path))
     logger.info("Searchable PDF written: %s (%d page(s))", output_path.name, len(pages))

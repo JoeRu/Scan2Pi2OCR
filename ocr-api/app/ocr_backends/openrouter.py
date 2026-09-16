@@ -19,7 +19,7 @@ from PIL import Image
 
 from app.config import Settings, get_settings
 from app.ocr_backends.tesseract import TesseractBackend
-from app.ocr_backends.types import OcrPage
+from app.ocr_backends.types import OcrLine, OcrPage
 
 try:
     from openrouter import OpenRouter
@@ -37,12 +37,54 @@ PROMPT = (
     "- Keep the original language (mostly German or English; Fraktur is possible).\n"
     "- Include handwritten text. Mark words you cannot read as [?].\n"
     "- Mark crossed-out text as [crossed out: <text>] instead of merging it into the sentence.\n"
+    "- Write tables as Markdown rows (| cell | cell |), keeping empty cells, so marks stay in their column.\n"
     "- Do not summarize, translate, correct, or add anything.\n"
     "Reply only with a JSON object:\n"
     '{"text": "<transcription>", '
     '"handwriting": <true if any handwritten text is present>, '
     '"uncertain": <true if parts could not be read confidently>}'
 )
+
+
+# OCR_LLM_PDF_TEXT=positioned: line-level transcription with Gemini-style boxes.
+LINES_PROMPT = (
+    "Transcribe all text on this scanned document page, line by line, including handwriting.\n"
+    "For every text line return its bounding box as box_2d = [ymin, xmin, ymax, xmax], "
+    "normalized to 0-1000 relative to the image height/width.\n"
+    "- One entry per visual line (one entry per table cell); keep reading order.\n"
+    "- Keep the original language; do not summarize, translate, or correct.\n"
+    "- Mark words you cannot read as [?] and crossed-out text as [crossed out: <text>].\n"
+    "- Set handwritten=true for handwritten lines."
+)
+
+# Strict schema: with plain json_object mode Gemini falls back to its detection
+# output habits and emits invalid JSON (`"label": "handwritten": true`, `"point"`).
+LINES_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "ocr_lines",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["lines"],
+            "properties": {"lines": {"type": "array", "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "box_2d", "handwritten"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "box_2d": {"type": "array", "items": {"type": "integer"},
+                               "minItems": 4, "maxItems": 4},
+                    "handwritten": {"type": "boolean"},
+                },
+            }}},
+        },
+    },
+}
+
+# A page's boxes are only used if at least this share of its lines is valid.
+_MIN_VALID_LINE_RATIO = 0.8
 
 
 @dataclass
@@ -139,14 +181,15 @@ def recover_truncated_text(content: str) -> str | None:
 
 
 def build_request(image: bytes, model: str, max_tokens: int, fallback_models: list[str],
-                  reasoning_effort: str = "") -> dict:
+                  reasoning_effort: str = "", prompt: str = PROMPT,
+                  response_format: dict | None = None) -> dict:
     data_url = "data:image/jpeg;base64," + base64.b64encode(image).decode("ascii")
     request = {
         "model": model,
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": data_url}},
             ],
         }],
@@ -154,7 +197,7 @@ def build_request(image: bytes, model: str, max_tokens: int, fallback_models: li
         "provider": {"data_collection": "deny"},
         "temperature": 0,
         "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
+        "response_format": response_format or {"type": "json_object"},
     }
     if fallback_models:
         request["models"] = [model, *fallback_models]
@@ -176,16 +219,7 @@ def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settin
     """One transcription request, retried once on error. Raises on failure or empty text."""
     request = build_request(image, model, max_tokens, settings.ocr_llm_fallback_models,
                             reasoning_effort)
-    timeout_ms = settings.ocr_llm_timeout * 1000
-    start = time.monotonic()
-    try:
-        result = client.chat.send(**request, timeout_ms=timeout_ms)
-    except Exception as exc:
-        logger.info("OpenRouter request to %s failed (%s: %s), retrying once",
-                    model, type(exc).__name__, exc)
-        time.sleep(_RETRY_DELAY_S)
-        result = client.chat.send(**request, timeout_ms=timeout_ms)
-    latency = time.monotonic() - start
+    result, latency = _send(client, request, model, settings)
 
     choice = result.choices[0]
     content = _content_text(choice.message.content)
@@ -202,18 +236,99 @@ def call_llm(client, image: bytes, model: str, max_tokens: int, settings: Settin
         text, handwriting, uncertain = parse_reply(content)
     if not text:
         raise ValueError(f"empty transcription from {model}")
+    return _reply_from(result, model, latency, text, handwriting, uncertain)
+
+
+def _send(client, request: dict, model: str, settings: Settings):
+    """chat.send, retried once after _RETRY_DELAY_S. Returns (result, latency_s)."""
+    timeout_ms = settings.ocr_llm_timeout * 1000
+    start = time.monotonic()
+    try:
+        result = client.chat.send(**request, timeout_ms=timeout_ms)
+    except Exception as exc:
+        logger.info("OpenRouter request to %s failed (%s: %s), retrying once",
+                    model, type(exc).__name__, exc)
+        time.sleep(_RETRY_DELAY_S)
+        result = client.chat.send(**request, timeout_ms=timeout_ms)
+    return result, time.monotonic() - start
+
+
+def _reply_from(result, model: str, latency: float, text: str,
+                handwriting: bool, uncertain: bool) -> LlmReply:
     usage = result.usage
     return LlmReply(
         text=text,
         handwriting=handwriting,
         uncertain=uncertain,
         model=result.model or model,
-        finish_reason=choice.finish_reason,
+        finish_reason=result.choices[0].finish_reason,
         prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
         completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
         cost=getattr(usage, "cost", 0.0) or 0.0,
         latency_s=latency,
     )
+
+
+def _valid_box(box) -> bool:
+    if not (isinstance(box, list) and len(box) == 4):
+        return False
+    if not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000 for v in box):
+        return False
+    ymin, xmin, ymax, xmax = box
+    return ymax > ymin and xmax > xmin
+
+
+def parse_box_lines(content: str, width_px: int, height_px: int) -> list[OcrLine] | None:
+    """Parse a LINES_RESPONSE_FORMAT reply into pixel OcrLines.
+
+    box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000. Invalid entries are
+    dropped; returns None when nothing usable is left or fewer than
+    _MIN_VALID_LINE_RATIO of the entries are valid (the page's boxes are then
+    not trusted at all).
+    """
+    data = _load_json_content((content or "").strip())
+    entries = data.get("lines") if isinstance(data, dict) else None
+    if not isinstance(entries, list) or not entries:
+        return None
+    lines = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("text")
+        box = entry.get("box_2d")
+        if not (isinstance(text, str) and text.strip() and _valid_box(box)):
+            continue
+        ymin, xmin, ymax, xmax = box
+        lines.append(OcrLine(
+            text=text.strip(),
+            x0=round(xmin / 1000 * width_px), y0=round(ymin / 1000 * height_px),
+            x1=round(xmax / 1000 * width_px), y1=round(ymax / 1000 * height_px),
+        ))
+    if not lines or len(lines) / len(entries) < _MIN_VALID_LINE_RATIO:
+        return None
+    return lines
+
+
+def call_llm_lines(client, image: bytes, model: str, max_tokens: int, settings: Settings,
+                   reasoning_effort: str, width_px: int, height_px: int) -> tuple[LlmReply, list[OcrLine]]:
+    """Line-level transcription with boxes. Raises ValueError if the boxes are unusable."""
+    request = build_request(image, model, max_tokens, settings.ocr_llm_fallback_models,
+                            reasoning_effort, prompt=LINES_PROMPT,
+                            response_format=LINES_RESPONSE_FORMAT)
+    result, latency = _send(client, request, model, settings)
+    content = _content_text(result.choices[0].message.content)
+    lines = parse_box_lines(content, width_px, height_px)
+    if not lines:
+        raise ValueError(f"no usable line boxes from {model}")
+    data = _load_json_content(content.strip())
+    handwriting = any(isinstance(e, dict) and e.get("handwritten") is True for e in data["lines"])
+    text = "\n".join(line.text for line in lines)
+    return _reply_from(result, model, latency, text, handwriting, False), lines
+
+
+def _image_size(path: Path) -> tuple[int, int]:
+    with Image.open(path) as img:
+        return img.size
 
 
 def escalation_reason(reply: LlmReply, unclear_max: int) -> str | None:
@@ -246,6 +361,8 @@ class _PageOutcome:
     reply: LlmReply
     escalated: bool
     cost: float  # includes the cheap call when escalated
+    pdf_text: str = "tesseract"
+    lines: list[OcrLine] | None = None  # LLM lines replacing Tesseract's (positioned)
 
 
 class OpenRouterBackend:
@@ -282,11 +399,15 @@ class OpenRouterBackend:
             ocr_page.transcript = outcome.reply.text
             ocr_page.transcript_model = outcome.reply.model
             ocr_page.escalated = outcome.escalated
+            ocr_page.pdf_text = outcome.pdf_text
+            if outcome.lines is not None:
+                ocr_page.lines = outcome.lines
 
         logger.info(
-            "OCR LLM: %d pages, %d escalated, %d fallback, $%.4f, %.1fs",
+            "OCR LLM: %d pages, %d escalated, %d positioned, %d fallback, $%.4f, %.1fs",
             len(pages),
             sum(1 for o in outcomes if o is not None and o.escalated),
+            sum(1 for o in outcomes if o is not None and o.pdf_text == "positioned"),
             sum(1 for o in outcomes if o is None),
             sum(o.cost for o in outcomes if o is not None),
             time.monotonic() - start,
@@ -304,30 +425,52 @@ class OpenRouterBackend:
                            page_no, type(exc).__name__, exc)
             return None
 
+        mode = settings.ocr_llm_pdf_text
+        # Non-positioned transcripts reach the PDF only as a block (block mode, or
+        # positioned mode after a box failure); otherwise the layer stays Tesseract.
+        plain_pdf_text = "block" if mode == "block" else "tesseract"
         reason = escalation_reason(reply, settings.ocr_llm_escalate_unclear_max)
-        _log_reply(page_no, reply, reason)
         strong = settings.ocr_llm_strong_model
         if reason is None or not strong or strong == settings.ocr_llm_model:
-            return _PageOutcome(reply, False, reply.cost)
+            _log_reply(page_no, reply, reason, pdf_text=plain_pdf_text)
+            return _PageOutcome(reply, False, reply.cost, plain_pdf_text)
+        _log_reply(page_no, reply, reason)
+
+        strong_tokens = 2 * settings.ocr_llm_max_tokens
+        strong_effort = settings.ocr_llm_strong_reasoning_effort
+        if mode == "positioned":
+            try:
+                width_px, height_px = _image_size(path)
+                strong_reply, lines = call_llm_lines(client, image, strong, strong_tokens, settings,
+                                                     strong_effort, width_px, height_px)
+            except Exception as exc:
+                logger.warning("Page %d: positioned lines from %s failed, falling back to block: %s: %s",
+                               page_no, strong, type(exc).__name__, exc)
+                plain_pdf_text = "block"
+            else:
+                _log_reply(page_no, strong_reply, None, pdf_text="positioned")
+                return _PageOutcome(strong_reply, True, reply.cost + strong_reply.cost,
+                                    "positioned", lines)
 
         try:
-            strong_reply = call_llm(client, image, strong, 2 * settings.ocr_llm_max_tokens,
-                                    settings, settings.ocr_llm_strong_reasoning_effort)
+            strong_reply = call_llm(client, image, strong, strong_tokens, settings, strong_effort)
         except Exception as exc:
             logger.warning("Page %d: escalation to %s failed, keeping %s result: %s: %s",
                            page_no, strong, reply.model, type(exc).__name__, exc)
-            return _PageOutcome(reply, False, reply.cost)
-        _log_reply(page_no, strong_reply, None)
-        return _PageOutcome(strong_reply, True, reply.cost + strong_reply.cost)
+            return _PageOutcome(reply, False, reply.cost, plain_pdf_text)
+        _log_reply(page_no, strong_reply, None, pdf_text=plain_pdf_text)
+        return _PageOutcome(strong_reply, True, reply.cost + strong_reply.cost, plain_pdf_text)
 
 
-def _log_reply(page_no: int, reply: LlmReply, escalate_reason: str | None) -> None:
+def _log_reply(page_no: int, reply: LlmReply, escalate_reason: str | None,
+               pdf_text: str | None = None) -> None:
     # A truncated reply means the token budget ran out (often on reasoning): warn.
     level = logging.WARNING if reply.finish_reason == "length" else logging.INFO
     logger.log(
         level,
-        "Page %d: model=%s fin=%s tokens=%d/%d cost=$%.4f latency=%.1fs%s",
+        "Page %d: model=%s fin=%s tokens=%d/%d cost=$%.4f latency=%.1fs%s%s",
         page_no, reply.model, reply.finish_reason, reply.prompt_tokens, reply.completion_tokens,
         reply.cost, reply.latency_s,
         f" escalate={escalate_reason}" if escalate_reason else "",
+        f" pdf={pdf_text}" if pdf_text else "",
     )

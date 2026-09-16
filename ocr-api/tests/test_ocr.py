@@ -88,7 +88,8 @@ def test_process_scan_reports_ocr_pages_provenance(tmp_path):
     mock_backend = MagicMock()
     mock_backend.run.return_value = [
         OcrPage([OcrLine("tess a", 0, 0, 10, 5)], transcript="llm a",
-                transcript_model="google/gemini-3.1-pro-preview", escalated=True),
+                transcript_model="google/gemini-3.1-pro-preview", escalated=True,
+                pdf_text="positioned"),
         OcrPage([OcrLine("tess b", 0, 0, 10, 5)]),
     ]
 
@@ -104,7 +105,7 @@ def test_process_scan_reports_ocr_pages_provenance(tmp_path):
         result = asyncio.run(_process_scan(str(tmp_path), "output"))
 
     assert result["ocr_pages"] == [
-        {"page": 1, "model": "google/gemini-3.1-pro-preview", "escalated": True},
-        {"page": 2, "model": None, "escalated": False},
+        {"page": 1, "model": "google/gemini-3.1-pro-preview", "escalated": True, "pdf_text": "positioned"},
+        {"page": 2, "model": None, "escalated": False, "pdf_text": "tesseract"},
     ]
     assert Path(result["txt"]).read_text() == "llm a\n\ntess b"

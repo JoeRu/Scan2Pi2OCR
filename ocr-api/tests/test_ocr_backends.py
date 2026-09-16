@@ -791,6 +791,7 @@ def _run_backend(tmp_path, settings, send, n_pages=1, client_error=None):
          patch("app.ocr_backends.openrouter.TesseractBackend") as MockTess, \
          patch("app.ocr_backends.openrouter.prepare_image",
                side_effect=lambda path, max_side: path.name.encode()), \
+         patch("app.ocr_backends.openrouter._image_size", return_value=(2000, 3000)), \
          client_patch as mock_client, \
          patch("app.ocr_backends.openrouter.time.sleep"):
         MockTess.return_value.run.return_value = tesseract_pages
@@ -968,3 +969,205 @@ def test_openrouter_run_preserves_page_order_with_concurrency(tmp_path):
 
 def test_get_backend_openrouter_returns_backend():
     assert isinstance(get_backend("openrouter"), OpenRouterBackend)
+
+
+# ---------------------------------------------------------------------------
+# LLM text in the PDF layer: OCR_LLM_PDF_TEXT = off | block | positioned
+# ---------------------------------------------------------------------------
+from app.ocr_backends.openrouter import LINES_PROMPT, call_llm_lines, parse_box_lines
+
+
+def _lines_content(*entries):
+    return _json.dumps({"lines": [
+        {"text": t, "box_2d": b, "handwritten": hw} for (t, b, hw) in entries
+    ]})
+
+
+def _lines_result(*entries, model="google/gemini-3.1-pro-preview", content=None):
+    return _llm_result(model=model, content=content if content is not None else _lines_content(*entries))
+
+
+def test_config_pdf_text_default_off_and_validated():
+    assert Settings(api_key="test").ocr_llm_pdf_text == "off"
+    assert Settings(api_key="test", ocr_llm_pdf_text="positioned").ocr_llm_pdf_text == "positioned"
+    with pytest.raises(ValueError):
+        Settings(api_key="test", ocr_llm_pdf_text="everywhere")
+
+
+def test_prompt_asks_for_markdown_tables():
+    assert "Markdown" in orb.PROMPT
+
+
+def test_parse_box_lines_converts_normalized_boxes_to_pixels():
+    content = _lines_content(("Hallo", [100, 200, 150, 600], True))
+    lines = parse_box_lines(content, width_px=2000, height_px=3000)
+    assert lines == [OcrLine("Hallo", x0=400, y0=300, x1=1200, y1=450)]
+
+
+def test_parse_box_lines_drops_invalid_boxes_when_80_percent_valid():
+    content = _lines_content(
+        ("a", [0, 0, 10, 10], False), ("b", [10, 0, 20, 10], False),
+        ("c", [20, 0, 30, 10], False), ("d", [30, 0, 40, 10], False),
+        ("bad", [50, 50, 40, 60], False),  # ymax < ymin
+    )
+    lines = parse_box_lines(content, width_px=1000, height_px=1000)
+    assert [l.text for l in lines] == ["a", "b", "c", "d"]
+
+
+@pytest.mark.parametrize("bad_box", [[0, 0, 10], [0, 0, 1001, 10], [0, 10, 5, 10], ["0", 0, 10, 10]])
+def test_parse_box_lines_rejects_page_below_80_percent_valid(bad_box):
+    content = _lines_content(
+        ("a", [0, 0, 10, 10], False), ("b", [10, 0, 20, 10], False),
+        ("c", [20, 0, 30, 10], False), ("bad", bad_box, False),
+    )
+    assert parse_box_lines(content, width_px=1000, height_px=1000) is None
+
+
+@pytest.mark.parametrize("content", ["", "not json", '{"lines": []}', '{"text": "x"}',
+                                     '{"lines": [{"text": "", "box_2d": [0, 0, 10, 10], "handwritten": false}]}'])
+def test_parse_box_lines_returns_none_for_unusable_content(content):
+    assert parse_box_lines(content, width_px=1000, height_px=1000) is None
+
+
+def test_build_request_custom_prompt_and_response_format():
+    fmt = {"type": "json_schema", "json_schema": {"name": "x"}}
+    req = build_request(b"x", "m", 10, [], prompt=LINES_PROMPT, response_format=fmt)
+    assert req["messages"][0]["content"][0]["text"] == LINES_PROMPT
+    assert req["response_format"] == fmt
+
+
+def test_call_llm_lines_returns_reply_and_pixel_lines():
+    client = MagicMock()
+    client.chat.send.return_value = _lines_result(
+        ("Er hat 70 €", [100, 100, 120, 500], True), ("Viel Erfolg!", [500, 400, 520, 600], False))
+    reply, lines = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
+                                  _llm_settings(), "", width_px=1000, height_px=2000)
+    sent = client.chat.send.call_args.kwargs
+    assert sent["messages"][0]["content"][0]["text"] == LINES_PROMPT
+    assert sent["response_format"]["type"] == "json_schema"
+    assert sent["response_format"]["json_schema"]["strict"] is True
+    assert reply.text == "Er hat 70 €\nViel Erfolg!"
+    assert reply.handwriting is True
+    assert lines[0] == OcrLine("Er hat 70 €", x0=100, y0=200, x1=500, y1=240)
+
+
+def test_call_llm_lines_raises_on_unusable_boxes():
+    client = MagicMock()
+    client.chat.send.return_value = _lines_result(content="not json")
+    with pytest.raises(ValueError, match="box"):
+        call_llm_lines(client, b"img", "m", 100, _llm_settings(), "", width_px=10, height_px=10)
+    assert client.chat.send.call_count == 1
+
+
+def test_call_llm_lines_real_sdk_serializes_json_schema():
+    openrouter = pytest.importorskip("openrouter")
+    import httpx
+    captured = {}
+
+    def handler(request):
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(200, json={
+            "id": "gen-1", "created": 1, "object": "chat.completion", "system_fingerprint": None,
+            "model": "google/gemini-3.1-pro-preview",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant", "content": _lines_content(("Hallo", [0, 0, 100, 100], True))}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": 0.01},
+        })
+
+    client = openrouter.OpenRouter(api_key="sk-test", retry_config=None,
+                                   client=httpx.Client(transport=httpx.MockTransport(handler)))
+    reply, lines = call_llm_lines(client, b"img", "google/gemini-3.1-pro-preview", 16000,
+                                  _llm_settings(), "", width_px=100, height_px=100)
+    fmt = captured["body"]["response_format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["json_schema"]["schema"]["required"] == ["lines"]
+    assert lines == [OcrLine("Hallo", 0, 0, 10, 10)]
+
+
+def test_openrouter_run_positioned_replaces_tesseract_lines_on_escalated_page(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="positioned")
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _lines_result(("S01", [10, 800, 30, 900], True), ("Aufgabe 1", [100, 100, 120, 400], False)),
+    ]
+    result, client, _ = _run_backend(tmp_path, settings, send)
+    page = result[0]
+    assert client.chat.send.call_count == 2
+    assert client.chat.send.call_args_list[1].kwargs["response_format"]["type"] == "json_schema"
+    assert page.pdf_text == "positioned"
+    assert page.escalated is True
+    assert page.transcript == "S01\nAufgabe 1"
+    assert page.transcript_model == "google/gemini-3.1-pro-preview"
+    # image patched to 2000x3000 px: [ymin, xmin, ymax, xmax] -> pixels
+    assert page.lines == [OcrLine("S01", 1600, 30, 1800, 90), OcrLine("Aufgabe 1", 200, 300, 800, 360)]
+
+
+def test_openrouter_run_positioned_falls_back_to_block_when_boxes_unusable(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="positioned")
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _lines_result(content="garbage"),
+        _llm_result(text="strong plain", model="google/gemini-3.1-pro-preview"),
+    ]
+    result, client, _ = _run_backend(tmp_path, settings, send)
+    page = result[0]
+    assert client.chat.send.call_count == 3
+    assert page.pdf_text == "block"
+    assert page.transcript == "strong plain"
+    assert [l.text for l in page.lines] == ["tess 1"]
+
+
+def test_openrouter_run_positioned_keeps_tesseract_on_non_escalated_page(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="positioned")
+    result, client, _ = _run_backend(tmp_path, settings, [_llm_result(text="printed")])
+    assert client.chat.send.call_count == 1
+    assert result[0].pdf_text == "tesseract"
+    assert [l.text for l in result[0].lines] == ["tess 1"]
+
+
+def test_openrouter_run_block_mode_marks_every_transcribed_page(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="block")
+    result, _, _ = _run_backend(tmp_path, settings, [_llm_result(text="printed")])
+    assert result[0].pdf_text == "block"
+
+
+def test_openrouter_run_off_mode_uses_plain_escalation(tmp_path):
+    send = [_llm_result(text="cheap", handwriting=True),
+            _llm_result(text="strong", model="google/gemini-3.1-pro-preview")]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    assert client.chat.send.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}
+    assert result[0].pdf_text == "tesseract"
+
+
+def test_openrouter_run_llm_failure_page_stays_tesseract_in_positioned_mode(tmp_path):
+    settings = _llm_settings(ocr_llm_pdf_text="positioned")
+    result, _, _ = _run_backend(tmp_path, settings, ConnectionError("down"))
+    assert result[0].pdf_text == "tesseract"
+    assert result[0].transcript is None
+
+
+def test_log_reply_includes_pdf_text(caplog):
+    with caplog.at_level("INFO", logger="app.ocr_backends.openrouter"):
+        orb._log_reply(1, _reply(), None, pdf_text="positioned")
+    assert "pdf=positioned" in caplog.text
+
+
+def test_build_searchable_pdf_block_adds_transcript_text(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    ocr = OcrPage([OcrLine("printed", 10, 10, 120, 30)],
+                  transcript="handschrift zeile\nzweite zeile", pdf_text="block")
+    build_searchable_pdf([page], [ocr], out)
+    text = _extract_pdf_text(out)
+    assert "printed" in text
+    assert "handschrift zeile" in text and "zweite zeile" in text
+
+
+def test_build_searchable_pdf_tesseract_mode_ignores_transcript(tmp_path):
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    ocr = OcrPage([OcrLine("printed", 10, 10, 120, 30)], transcript="handschrift zeile")
+    build_searchable_pdf([page], [ocr], out)
+    assert "handschrift" not in _extract_pdf_text(out)

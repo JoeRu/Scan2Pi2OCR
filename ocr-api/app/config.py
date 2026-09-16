@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # at its default finished every page in 4-7 s with the best transcripts.
     ocr_llm_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
     ocr_llm_strong_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
+    # LLM text in the PDF text layer (Ctrl+F, Paperless full-text search):
+    #   off        - Tesseract layer only
+    #   block      - plus the transcript as an invisible, unpositioned block per page
+    #   positioned - escalated pages: strong model returns lines with boxes, which
+    #                replace Tesseract's lines (falls back to block, then Tesseract)
+    ocr_llm_pdf_text: Literal["off", "block", "positioned"] = "off"
 
     trash_tmp_files: bool = True
 

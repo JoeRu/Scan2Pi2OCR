@@ -17,6 +17,10 @@ class OcrPage:
     transcript: str | None = None
     transcript_model: str | None = None
     escalated: bool = False
+    # What build_pdf puts in the invisible text layer: "tesseract" (lines only),
+    # "block" (lines + transcript as an unpositioned block) or "positioned"
+    # (lines are LLM lines with LLM boxes).
+    pdf_text: str = "tesseract"
 
     @property
     def text(self) -> str:
