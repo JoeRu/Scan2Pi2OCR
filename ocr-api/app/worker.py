@@ -113,6 +113,9 @@ async def _process_job(job_id: str, tmp_dir: str, file_name: str, scan_timestamp
                 logger.info("[%s] Delivery succeeded [%s]: %s", job_id, name, result)
                 merged.update(result)
 
+        if "ocr_pages" in ocr_result:
+            merged["ocr_pages"] = ocr_result["ocr_pages"]
+
         if errors:
             logger.warning("[%s] Finished with errors: %s", job_id, list(errors.keys()))
             _status[job_id] = {"status": "done_with_errors", "outputs": merged, "errors": errors}

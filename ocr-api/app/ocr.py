@@ -111,4 +111,9 @@ async def process_scan(tmp_dir: str, file_name: str) -> dict:
         "pdf": str(pdf_path),
         "txt": str(txt_path),
         "file_name": file_name,
+        # Which model read each page (None = engine text / Tesseract fallback).
+        "ocr_pages": [
+            {"page": i + 1, "model": page.transcript_model, "escalated": page.escalated}
+            for i, page in enumerate(pages_ocr)
+        ],
     }
