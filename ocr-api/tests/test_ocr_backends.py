@@ -367,7 +367,7 @@ def test_config_accepts_openrouter_engine():
 def test_config_ocr_llm_defaults():
     s = Settings(api_key="test")
     assert s.ocr_llm_model == "google/gemini-3.1-flash-lite"
-    assert s.ocr_llm_strong_model == "google/gemini-3.5-flash"
+    assert s.ocr_llm_strong_model == "google/gemini-3.1-pro-preview"
     assert s.ocr_llm_fallback_models == []
     assert s.ocr_llm_concurrency == 3
     assert s.ocr_llm_timeout == 90
@@ -375,7 +375,7 @@ def test_config_ocr_llm_defaults():
     assert s.ocr_llm_image_max_side == 2000
     assert s.ocr_llm_escalate_unclear_max == 2
     assert s.ocr_llm_reasoning_effort == ""
-    assert s.ocr_llm_strong_reasoning_effort == "medium"
+    assert s.ocr_llm_strong_reasoning_effort == ""
 
 
 def test_config_rejects_unknown_reasoning_effort():
@@ -538,7 +538,7 @@ def test_call_llm_passes_reasoning_effort():
 
 def test_log_reply_includes_finish_reason(caplog):
     with caplog.at_level("INFO", logger="app.ocr_backends.openrouter"):
-        orb._log_reply(2, _reply(model="google/gemini-3.5-flash", finish_reason="stop"), None)
+        orb._log_reply(2, _reply(model="google/gemini-3.1-pro-preview", finish_reason="stop"), None)
     assert "fin=stop" in caplog.text
 
 
@@ -815,15 +815,15 @@ def test_openrouter_run_sets_transcript_and_keeps_lines(tmp_path):
 def test_openrouter_run_escalates_handwriting_to_strong_model(tmp_path):
     send = [
         _llm_result(text="cheap", handwriting=True),
-        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+        _llm_result(text="strong", model="google/gemini-3.1-pro-preview"),
     ]
     result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
     page = result[0]
     assert page.transcript == "strong"
-    assert page.transcript_model == "google/gemini-3.5-flash"
+    assert page.transcript_model == "google/gemini-3.1-pro-preview"
     assert page.escalated is True
     second = client.chat.send.call_args_list[1].kwargs
-    assert second["model"] == "google/gemini-3.5-flash"
+    assert second["model"] == "google/gemini-3.1-pro-preview"
     assert second["max_tokens"] == 16000
 
 
@@ -831,7 +831,7 @@ def test_openrouter_run_uses_per_tier_reasoning_effort(tmp_path):
     settings = _llm_settings(ocr_llm_reasoning_effort="minimal", ocr_llm_strong_reasoning_effort="high")
     send = [
         _llm_result(text="cheap", handwriting=True),
-        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+        _llm_result(text="strong", model="google/gemini-3.1-pro-preview"),
     ]
     _, client, _ = _run_backend(tmp_path, settings, send)
     first, second = (c.kwargs for c in client.chat.send.call_args_list)
@@ -850,7 +850,7 @@ def test_openrouter_run_default_cheap_call_sends_no_reasoning(tmp_path):
     {"finish_reason": "length"},
 ])
 def test_openrouter_run_escalates_on_other_reasons(tmp_path, first):
-    send = [_llm_result(**first), _llm_result(text="strong", model="google/gemini-3.5-flash")]
+    send = [_llm_result(**first), _llm_result(text="strong", model="google/gemini-3.1-pro-preview")]
     result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
     assert client.chat.send.call_count == 2
     assert result[0].escalated is True
@@ -913,12 +913,12 @@ def test_openrouter_run_truncated_recoverable_cheap_escalates(tmp_path):
     still recoverable -> that recovered text is used and escalation still fires."""
     send = [
         _llm_result(content='{"text": "cheap text cut off', finish_reason="length"),
-        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+        _llm_result(text="strong", model="google/gemini-3.1-pro-preview"),
     ]
     result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
     assert client.chat.send.call_count == 2
     assert result[0].transcript == "strong"
-    assert result[0].transcript_model == "google/gemini-3.5-flash"
+    assert result[0].transcript_model == "google/gemini-3.1-pro-preview"
     assert result[0].escalated is True
 
 

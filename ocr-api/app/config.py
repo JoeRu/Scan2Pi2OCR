@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # transcribes each page. Cheap model first; handwritten/uncertain pages are
     # re-run on the strong model (empty = no escalation). Uses openrouter_api_key.
     ocr_llm_model: str = "google/gemini-3.1-flash-lite"
-    ocr_llm_strong_model: str = "google/gemini-3.5-flash"
+    ocr_llm_strong_model: str = "google/gemini-3.1-pro-preview"
     ocr_llm_fallback_models: list[str] = []  # env: JSON list
     ocr_llm_concurrency: int = 3
     ocr_llm_timeout: int = 90
@@ -40,10 +40,11 @@ class Settings(BaseSettings):
     ocr_llm_image_max_side: int = 2000
     ocr_llm_escalate_unclear_max: int = 2
     # OpenRouter reasoning effort per tier ("" = provider default, no `reasoning` sent).
-    # Reasoning models (e.g. gemini-3.5-flash) burn most of the token budget on
-    # thinking at the default; "medium" keeps crossed-out/handwriting detail.
+    # Measured 2026-09-16 on a 5-page handwritten scan: gemini-3.5-flash ran away to
+    # ~16k reasoning tokens (60+ s, truncations) at any effort; gemini-3.1-pro-preview
+    # at its default finished every page in 4-7 s with the best transcripts.
     ocr_llm_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
-    ocr_llm_strong_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = "medium"
+    ocr_llm_strong_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
 
     trash_tmp_files: bool = True
 
