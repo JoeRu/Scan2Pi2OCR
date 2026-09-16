@@ -1288,6 +1288,28 @@ def test_call_llm_lines_returns_handwritten_flags():
     assert flags == [False, True]
 
 
+def test_chunk_bfchar_blocks_splits_into_blocks_of_at_most_100():
+    from app.ocr_backends.build_pdf import _chunk_bfchar_blocks
+    entries = "".join(f"<{i:04X}> <{0x41 + i:04X}>\n" for i in range(250))
+    cmap = f"begincmap\n250 beginbfchar\n{entries}endbfchar\nendcmap\n"
+    out = _chunk_bfchar_blocks(cmap)
+    assert "100 beginbfchar" in out and "50 beginbfchar" in out
+    assert out.count("beginbfchar") == 3 and out.count("endbfchar") == 3
+    assert out.count("> <") == 250
+    assert _chunk_bfchar_blocks("q 1 0 0 1 0 0 cm Q") == "q 1 0 0 1 0 0 cm Q"
+
+
+def test_build_searchable_pdf_writes_tounicode_blocks_of_at_most_100(tmp_path):
+    import re
+    page = tmp_path / "scan_0001.pnm.tif"
+    _make_realistic_tif(page)
+    out = tmp_path / "out.pdf"
+    many = "".join(chr(c) for c in list(range(0x21, 0x7F)) + list(range(0xC0, 0x100)))
+    build_searchable_pdf([page], [_page((many, 10, 10, 240, 30))], out)
+    counts = [int(n) for n in re.findall(rb"(\d+) beginbfchar", out.read_bytes())]
+    assert counts and max(counts) <= 100 and sum(counts) >= len(many)
+
+
 def test_build_searchable_pdf_skips_glyphs_missing_from_font(tmp_path):
     # Real scan 2026-09-16: an LLM line held a character DejaVuSans has no glyph
     # for; fpdf raised TypeError and the whole job failed. U+1D465 (math italic x)
