@@ -1,9 +1,11 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 python-multipart==0.0.31
-httpx==0.27.0
+httpx==0.28.1
 pydantic-settings==2.2.1
 fpdf2==2.7.9
 Pillow==12.3.0
 paddleocr==3.4.1
 paddlepaddle==3.3.1
+pydantic==2.12.5
+openrouter==1.1.148

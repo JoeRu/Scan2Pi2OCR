@@ -58,6 +58,7 @@ print('PaddleOCR warmup done') \
 
 
 COPY --chown=ocr:ocr app/ /ocr-api/app/
+COPY --chown=ocr:ocr scripts/ /ocr-api/scripts/
 
 COPY --chown=ocr:ocr entrypoint.sh /ocr-api/entrypoint.sh
 RUN chmod +x /ocr-api/entrypoint.sh

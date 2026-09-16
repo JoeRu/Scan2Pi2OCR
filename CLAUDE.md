@@ -43,7 +43,7 @@ worker_loop() (background asyncio task)
   → process_scan()      [ocr.py]      — blank removal, contrast fix, OCR
   → extract_ai_metadata()             — optional LLM classification
   → deliver_*() in parallel           — filesystem / paperless / rclone / mail
-  → updates _status[job_id]
+  → updates _status[job_id] (outputs include ocr_pages: model per page)
 
 GET /scan/status/{job_id}
   → reads _status dict → returns {status, outputs}
@@ -58,16 +58,15 @@ GET /scan/status/{job_id}
 
 ### Pluggable OCR backends (`ocr-api/app/ocr_backends/`)
 
-- `base.py` — `OcrBackend` Protocol: `run(pages: list[Path], language: str) -> str`
+- `base.py` — `OcrBackend` Protocol: `run(pages: list[Path], language: str) -> list[OcrPage]`
 - `tesseract.py` — wraps Tesseract CLI subprocess, reads `_ocr_out.txt`
 - `paddleocr.py` — PaddleOCR Python API (lazy import; `try/except ImportError` at module level for mockability). PaddleOCR's detector is capped via `PADDLE_DET_LIMIT_TYPE` (default `max`) and `PADDLE_DET_LIMIT_SIDE_LEN` (default `1600`); without the cap a 300 dpi A4 scan OOM-kills the process (PaddleOCR#17955).
 - `gcv.py` — Google Cloud Vision stub (raises `NotImplementedError`)
+- `openrouter.py` — hybrid: runs `TesseractBackend` for the positioned lines, then transcribes each page with a vision LLM via the `openrouter` SDK into `OcrPage.transcript` (which `OcrPage.text` prefers; `build_pdf` still uses `lines`). Cheap `OCR_LLM_MODEL` first; handwritten/uncertain/truncated pages escalate to `OCR_LLM_STRONG_MODEL`. Requests set `provider.data_collection=deny`. Any LLM failure keeps the Tesseract text. `OCR_LLM_PDF_TEXT` (`off`|`block`|`positioned`, `OcrPage.pdf_text`) puts LLM text into the PDF layer: `block` adds the transcript as an invisible unpositioned block; `positioned` has the strong model return lines with Gemini `box_2d` boxes (strict `json_schema` — `json_object` mode yields invalid JSON) that replace Tesseract's `lines` on escalated pages, falling back to `block`. `merge_printed_lines()` makes it a hybrid: printed LLM lines that Tesseract read ≥80% the same way (Tesseract line ≥50% inside the LLM box) keep Tesseract's text + box, because Gemini's line mode intermittently misreads printed glyphs (€→—, ü→ö); handwritten lines always stay LLM lines. Tests patch `_client`, `TesseractBackend`, `prepare_image`, `_image_size`, and `time.sleep`. `scripts/compare_ocr_models.py` compares models on real pages.
 - `build_pdf.py` — `build_searchable_pdf()` creates PDFs via `fpdf2`: TIF images as pages + invisible white text layer for Ctrl+F searchability
 - `__init__.py` — `get_backend(engine: str)` factory with lazy per-branch imports
 
-Switch engine via `OCR_ENGINE=paddleocr` (env var). Default: `tesseract`. Valid values are enforced by `Literal["tesseract", "paddleocr", "gcv"]` in config.
-
-**Known limitation:** all OCR text goes on page 1 of multi-page PDFs. Per-page placement requires `OcrBackend.run()` to return `list[str]` instead of `str`.
+Switch engine via `OCR_ENGINE` (env var, e.g. `openrouter`). Default: `tesseract`. Valid values are enforced by `Literal["tesseract", "paddleocr", "gcv", "openrouter"]` in config.
 
 ### AI metadata (`ocr-api/app/ai_metadata.py`)
 
@@ -93,8 +92,7 @@ Pydantic `Settings` loaded from `.env`. `get_settings()` is `lru_cache`-wrapped 
 - `tests/test_worker.py` — worker queue and job lifecycle
 - `tests/test_ai_metadata.py` — prompt building and JSON parsing
 - `tests/test_paperless.py` — Paperless delivery and entity lookup
-
-Two tests in `test_paperless.py` are pre-existing failures unrelated to the OCR backend work.
+- `tests/test_compare_ocr_models.py` — CER + comparison script (mocked client)
 
 ## Docker smoke test
 

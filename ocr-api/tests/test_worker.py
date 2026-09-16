@@ -307,3 +307,37 @@ async def test_process_job_ai_passes_metadata_to_paperless(tmp_path):
     _, called_name, called_meta = mock_pl.call_args[0]
     assert called_name == "20240101_000000_contract_vendor"
     assert called_meta is ai_meta
+
+
+@pytest.mark.asyncio
+async def test_process_job_status_includes_ocr_pages(tmp_path):
+    settings = _make_settings()
+    ocr_pages = [{"page": 1, "model": "google/gemini-3.1-flash-lite", "escalated": False}]
+    ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt"),
+                  "ocr_pages": ocr_pages}
+
+    with patch("app.worker.get_settings", return_value=settings), \
+         patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
+         patch("shutil.rmtree"):
+        await _process_job("jp1", str(tmp_path), "scan_001", _now())
+
+    assert worker_mod._status["jp1"]["status"] == "done"
+    assert worker_mod._status["jp1"]["outputs"]["ocr_pages"] == ocr_pages
+
+
+@pytest.mark.asyncio
+async def test_process_job_status_with_errors_includes_ocr_pages(tmp_path):
+    settings = _make_settings(enable_filesystem=True)
+    ocr_pages = [{"page": 1, "model": None, "escalated": False}]
+    ocr_result = {"pdf": str(tmp_path / "out.pdf"), "txt": str(tmp_path / "out.txt"),
+                  "ocr_pages": ocr_pages}
+
+    with patch("app.worker.get_settings", return_value=settings), \
+         patch("app.worker.process_scan", new_callable=AsyncMock, return_value=ocr_result), \
+         patch("app.worker.deliver_filesystem", new_callable=AsyncMock, side_effect=OSError("disk full")), \
+         patch("shutil.rmtree"):
+        await _process_job("jp2", str(tmp_path), "scan_001", _now())
+
+    status = worker_mod._status["jp2"]
+    assert status["status"] == "done_with_errors"
+    assert status["outputs"]["ocr_pages"] == ocr_pages

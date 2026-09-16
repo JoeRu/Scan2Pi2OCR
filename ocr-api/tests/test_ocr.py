@@ -79,3 +79,33 @@ def test_process_scan_raises_when_all_pages_blank(tmp_path):
 def _process_scan(tmp_dir, file_name):
     from app.ocr import process_scan
     return process_scan(tmp_dir, file_name)
+
+
+def test_process_scan_reports_ocr_pages_provenance(tmp_path):
+    _make_tif(tmp_path / "scan_0001.pnm.tif")
+    _make_tif(tmp_path / "scan_0002.pnm.tif")
+
+    mock_backend = MagicMock()
+    mock_backend.run.return_value = [
+        OcrPage([OcrLine("tess a", 0, 0, 10, 5)], transcript="llm a",
+                transcript_model="google/gemini-3.1-pro-preview", escalated=True,
+                pdf_text="positioned"),
+        OcrPage([OcrLine("tess b", 0, 0, 10, 5)]),
+    ]
+
+    def fake_pdf(pages, pages_ocr, path):
+        path.write_bytes(b"%PDF-1.4")
+
+    with patch("app.ocr.get_settings", return_value=_settings_with_engine("openrouter")), \
+         patch("app.ocr.get_backend", return_value=mock_backend), \
+         patch("app.ocr.build_searchable_pdf", side_effect=fake_pdf), \
+         patch("app.ocr.convert_to_pdfa"), \
+         patch("app.ocr.remove_blank_pages"), \
+         patch("app.ocr.clean_page"):
+        result = asyncio.run(_process_scan(str(tmp_path), "output"))
+
+    assert result["ocr_pages"] == [
+        {"page": 1, "model": "google/gemini-3.1-pro-preview", "escalated": True, "pdf_text": "positioned"},
+        {"page": 2, "model": None, "escalated": False, "pdf_text": "tesseract"},
+    ]
+    assert Path(result["txt"]).read_text() == "llm a\n\ntess b"
