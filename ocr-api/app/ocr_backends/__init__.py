@@ -13,6 +13,10 @@ def get_backend(engine: str) -> OcrBackend:
     if engine == "gcv":
         from app.ocr_backends.gcv import GoogleCloudVisionBackend
         return GoogleCloudVisionBackend()
+    if engine == "openrouter":
+        from app.ocr_backends.openrouter import OpenRouterBackend
+        return OpenRouterBackend()
     raise ValueError(
-        f"Unknown OCR engine: {engine!r}. Valid values: 'tesseract', 'paddleocr', 'gcv'."
+        f"Unknown OCR engine: {engine!r}. "
+        "Valid values: 'tesseract', 'paddleocr', 'gcv', 'openrouter'."
     )

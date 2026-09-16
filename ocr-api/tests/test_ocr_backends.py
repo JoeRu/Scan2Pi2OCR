@@ -574,3 +574,150 @@ def test_call_llm_against_real_sdk_request_shape():
     assert body["response_format"] == {"type": "json_object"}
     assert body["messages"][0]["content"][1]["type"] == "image_url"
     assert (reply.text, reply.handwriting, reply.cost) == ("Hallo", True, 0.0004)
+
+
+# ---------------------------------------------------------------------------
+# OpenRouterBackend
+# ---------------------------------------------------------------------------
+from time import sleep as _real_sleep
+
+from app.ocr_backends.openrouter import OpenRouterBackend
+
+
+def _page_name(send_kwargs):
+    """prepare_image is patched to return the page file name as bytes; decode it back."""
+    url = send_kwargs["messages"][0]["content"][1]["image_url"]["url"]
+    return base64.b64decode(url.split(",", 1)[1]).decode()
+
+
+def _run_backend(tmp_path, settings, send, n_pages=1, client_error=None):
+    pages = [tmp_path / f"scan_{i:04d}.pnm.tif" for i in range(1, n_pages + 1)]
+    tesseract_pages = [OcrPage([OcrLine(f"tess {i}", 0, 0, 10, 5)]) for i in range(1, n_pages + 1)]
+    client = MagicMock()
+    client.chat.send.side_effect = send
+    client_patch = (patch("app.ocr_backends.openrouter._client", side_effect=client_error)
+                    if client_error else
+                    patch("app.ocr_backends.openrouter._client", return_value=client))
+    with patch("app.ocr_backends.openrouter.get_settings", return_value=settings), \
+         patch("app.ocr_backends.openrouter.TesseractBackend") as MockTess, \
+         patch("app.ocr_backends.openrouter.prepare_image",
+               side_effect=lambda path, max_side: path.name.encode()), \
+         client_patch as mock_client, \
+         patch("app.ocr_backends.openrouter.time.sleep"):
+        MockTess.return_value.run.return_value = tesseract_pages
+        result = OpenRouterBackend().run(pages, "deu+eng")
+        MockTess.return_value.run.assert_called_once_with(pages, "deu+eng")
+    return result, client, mock_client
+
+
+def test_openrouter_run_sets_transcript_and_keeps_lines(tmp_path):
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result(text="LLM Text")])
+    assert len(result) == 1
+    page = result[0]
+    assert [l.text for l in page.lines] == ["tess 1"]
+    assert page.transcript == "LLM Text"
+    assert page.text == "LLM Text"
+    assert page.transcript_model == "google/gemini-3.1-flash-lite"
+    assert page.escalated is False
+    assert client.chat.send.call_count == 1
+    assert client.chat.send.call_args.kwargs["model"] == "google/gemini-3.1-flash-lite"
+
+
+def test_openrouter_run_escalates_handwriting_to_strong_model(tmp_path):
+    send = [
+        _llm_result(text="cheap", handwriting=True),
+        _llm_result(text="strong", model="google/gemini-3.5-flash"),
+    ]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    page = result[0]
+    assert page.transcript == "strong"
+    assert page.transcript_model == "google/gemini-3.5-flash"
+    assert page.escalated is True
+    second = client.chat.send.call_args_list[1].kwargs
+    assert second["model"] == "google/gemini-3.5-flash"
+    assert second["max_tokens"] == 8000
+
+
+@pytest.mark.parametrize("first", [
+    {"uncertain": True},
+    {"text": "a [?] b [?] c [?]"},
+    {"finish_reason": "length"},
+])
+def test_openrouter_run_escalates_on_other_reasons(tmp_path, first):
+    send = [_llm_result(**first), _llm_result(text="strong", model="google/gemini-3.5-flash")]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    assert client.chat.send.call_count == 2
+    assert result[0].escalated is True
+
+
+@pytest.mark.parametrize("strong", ["", "google/gemini-3.1-flash-lite"])
+def test_openrouter_run_no_escalation_without_distinct_strong_model(tmp_path, strong):
+    settings = _llm_settings(ocr_llm_strong_model=strong)
+    result, client, _ = _run_backend(tmp_path, settings, [_llm_result(text="cheap", handwriting=True)])
+    assert client.chat.send.call_count == 1
+    assert result[0].transcript == "cheap"
+    assert result[0].escalated is False
+
+
+def test_openrouter_run_strong_failure_keeps_cheap_result(tmp_path):
+    send = [_llm_result(text="cheap", handwriting=True), RuntimeError("no route"), RuntimeError("no route")]
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), send)
+    assert client.chat.send.call_count == 3
+    assert result[0].transcript == "cheap"
+    assert result[0].transcript_model == "google/gemini-3.1-flash-lite"
+    assert result[0].escalated is False
+
+
+def test_openrouter_run_llm_failure_keeps_tesseract_text(tmp_path):
+    result, _, _ = _run_backend(tmp_path, _llm_settings(), ConnectionError("down"))
+    assert result[0].transcript is None
+    assert result[0].transcript_model is None
+    assert result[0].text == "tess 1"
+
+
+def test_openrouter_run_empty_reply_keeps_tesseract_text(tmp_path):
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result(text="")])
+    assert client.chat.send.call_count == 1
+    assert result[0].transcript is None
+    assert result[0].text == "tess 1"
+
+
+def test_openrouter_run_invalid_json_uses_raw_text_without_escalation(tmp_path):
+    result, client, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result(content="Rohtext ohne JSON")])
+    assert client.chat.send.call_count == 1
+    assert result[0].transcript == "Rohtext ohne JSON"
+    assert result[0].escalated is False
+
+
+def test_openrouter_run_missing_api_key_skips_llm(tmp_path):
+    settings = _llm_settings(openrouter_api_key="")
+    result, client, mock_client = _run_backend(tmp_path, settings, [_llm_result()])
+    mock_client.assert_not_called()
+    client.chat.send.assert_not_called()
+    assert result[0].transcript is None
+
+
+def test_openrouter_run_client_creation_failure_keeps_tesseract_text(tmp_path):
+    result, _, _ = _run_backend(tmp_path, _llm_settings(), [_llm_result()],
+                                client_error=RuntimeError("openrouter package is not installed"))
+    assert result[0].transcript is None
+    assert result[0].text == "tess 1"
+
+
+def test_openrouter_run_preserves_page_order_with_concurrency(tmp_path):
+    delays = {"scan_0001.pnm.tif": 0.2, "scan_0002.pnm.tif": 0.1, "scan_0003.pnm.tif": 0.0}
+
+    def send(**kwargs):
+        name = _page_name(kwargs)
+        _real_sleep(delays[name])  # page 1 finishes last
+        return _llm_result(text=f"llm {name}")
+
+    settings = _llm_settings(ocr_llm_concurrency=3)
+    result, _, _ = _run_backend(tmp_path, settings, send, n_pages=3)
+    assert [p.transcript for p in result] == [
+        "llm scan_0001.pnm.tif", "llm scan_0002.pnm.tif", "llm scan_0003.pnm.tif",
+    ]
+
+
+def test_get_backend_openrouter_returns_backend():
+    assert isinstance(get_backend("openrouter"), OpenRouterBackend)

@@ -11,12 +11,15 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
-from app.config import Settings
+from app.config import Settings, get_settings
+from app.ocr_backends.tesseract import TesseractBackend
+from app.ocr_backends.types import OcrPage
 
 try:
     from openrouter import OpenRouter
@@ -161,4 +164,85 @@ def _client(settings: Settings):
     return OpenRouter(
         api_key=settings.openrouter_api_key,
         http_referer="https://github.com/Scan2Pi2OCR",
+    )
+
+
+@dataclass
+class _PageOutcome:
+    reply: LlmReply
+    escalated: bool
+    cost: float  # includes the cheap call when escalated
+
+
+class OpenRouterBackend:
+    def run(self, pages: list[Path], language: str) -> list[OcrPage]:
+        result = TesseractBackend().run(pages, language)
+        settings = get_settings()
+        if not settings.openrouter_api_key:
+            logger.error("OCR_ENGINE=openrouter but OPENROUTER_API_KEY is empty; "
+                         "using Tesseract text only")
+            return result
+        try:
+            client = _client(settings)
+        except Exception as exc:
+            logger.error("Could not create OpenRouter client, using Tesseract text only: %s: %s",
+                         type(exc).__name__, exc)
+            return result
+
+        start = time.monotonic()
+        with ThreadPoolExecutor(max_workers=max(1, settings.ocr_llm_concurrency)) as pool:
+            outcomes = list(pool.map(
+                lambda item: self._transcribe(client, settings, item[0], item[1]),
+                enumerate(pages),
+            ))
+
+        for ocr_page, outcome in zip(result, outcomes):
+            if outcome is None:
+                continue
+            ocr_page.transcript = outcome.reply.text
+            ocr_page.transcript_model = outcome.reply.model
+            ocr_page.escalated = outcome.escalated
+
+        logger.info(
+            "OCR LLM: %d pages, %d escalated, %d fallback, $%.4f, %.1fs",
+            len(pages),
+            sum(1 for o in outcomes if o is not None and o.escalated),
+            sum(1 for o in outcomes if o is None),
+            sum(o.cost for o in outcomes if o is not None),
+            time.monotonic() - start,
+        )
+        return result
+
+    def _transcribe(self, client, settings: Settings, index: int, path: Path) -> _PageOutcome | None:
+        page_no = index + 1
+        try:
+            image = prepare_image(path, settings.ocr_llm_image_max_side)
+            reply = call_llm(client, image, settings.ocr_llm_model, settings.ocr_llm_max_tokens, settings)
+        except Exception as exc:
+            logger.warning("Page %d: LLM OCR failed, keeping Tesseract text: %s: %s",
+                           page_no, type(exc).__name__, exc)
+            return None
+
+        reason = escalation_reason(reply, settings.ocr_llm_escalate_unclear_max)
+        _log_reply(page_no, reply, reason)
+        strong = settings.ocr_llm_strong_model
+        if reason is None or not strong or strong == settings.ocr_llm_model:
+            return _PageOutcome(reply, False, reply.cost)
+
+        try:
+            strong_reply = call_llm(client, image, strong, 2 * settings.ocr_llm_max_tokens, settings)
+        except Exception as exc:
+            logger.warning("Page %d: escalation to %s failed, keeping %s result: %s: %s",
+                           page_no, strong, reply.model, type(exc).__name__, exc)
+            return _PageOutcome(reply, False, reply.cost)
+        _log_reply(page_no, strong_reply, None)
+        return _PageOutcome(strong_reply, True, reply.cost + strong_reply.cost)
+
+
+def _log_reply(page_no: int, reply: LlmReply, escalate_reason: str | None) -> None:
+    logger.info(
+        "Page %d: model=%s tokens=%d/%d cost=$%.4f latency=%.1fs%s",
+        page_no, reply.model, reply.prompt_tokens, reply.completion_tokens,
+        reply.cost, reply.latency_s,
+        f" escalate={escalate_reason}" if escalate_reason else "",
     )
