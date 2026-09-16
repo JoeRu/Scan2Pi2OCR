@@ -576,6 +576,69 @@ def test_call_llm_against_real_sdk_request_shape():
     assert (reply.text, reply.handwriting, reply.cost) == ("Hallo", True, 0.0004)
 
 
+def test_client_passes_expected_kwargs():
+    with patch("app.ocr_backends.openrouter.OpenRouter") as MockOpenRouter:
+        MockOpenRouter.return_value = "the-client"
+        result = orb._client(_llm_settings(openrouter_api_key="sk-abc"))
+    assert result == "the-client"
+    MockOpenRouter.assert_called_once_with(
+        api_key="sk-abc",
+        http_referer="https://github.com/Scan2Pi2OCR",
+        retry_config=None,
+    )
+
+
+def test_client_raises_when_openrouter_package_missing():
+    with patch("app.ocr_backends.openrouter.OpenRouter", None):
+        with pytest.raises(RuntimeError, match="not installed"):
+            orb._client(_llm_settings())
+
+
+def test_client_disables_sdk_retry_so_call_llm_retries_only_once(monkeypatch):
+    """C1 contract test: without retry_config=None, the real SDK's default backoff
+    retries 5XX responses for up to an hour on its own, on top of call_llm's own
+    2s-retry-once policy -> a scan can hang for hours during an outage.
+
+    Builds the client the same way `_client()` does (same kwargs), but injects a
+    MockTransport so no real network call happens. The handler is call-count
+    limited so that even if the fix is missing, the test fails fast instead of
+    actually waiting out the SDK's real backoff timers (a few real sub-second
+    sleeps happen from the SDK's own un-patched backoff, capped deliberately low).
+    """
+    openrouter_sdk = pytest.importorskip("openrouter")
+    import httpx
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise AssertionError("handler called more than twice; SDK retry not disabled")
+        return httpx.Response(503, json={"error": {"message": "unavailable"}})
+
+    class _ForwardingOpenRouter:
+        """Stands in for `app.ocr_backends.openrouter.OpenRouter`, forwarding every
+        kwarg `_client()` passes (so this test exercises `_client`'s real kwargs)
+        plus a mocked transport so no real network call happens."""
+
+        def __init__(self, **kwargs):
+            kwargs["client"] = httpx.Client(transport=httpx.MockTransport(handler))
+            self._inner = openrouter_sdk.OpenRouter(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(orb, "OpenRouter", _ForwardingOpenRouter)
+    client = orb._client(_llm_settings())
+
+    with patch("app.ocr_backends.openrouter.time.sleep") as sleep:
+        with pytest.raises(Exception):
+            call_llm(client, b"img", "google/gemini-3.1-flash-lite", 4000, _llm_settings())
+
+    assert calls["n"] == 2
+    sleep.assert_called_once_with(2.0)
+
+
 # ---------------------------------------------------------------------------
 # OpenRouterBackend
 # ---------------------------------------------------------------------------

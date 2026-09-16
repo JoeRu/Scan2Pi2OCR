@@ -164,6 +164,10 @@ def _client(settings: Settings):
     return OpenRouter(
         api_key=settings.openrouter_api_key,
         http_referer="https://github.com/Scan2Pi2OCR",
+        # The SDK's own default retry policy backs off on 5XX for up to an hour
+        # (openrouter/chat.py). call_llm()'s single 2s-retry-once is the only
+        # retry policy we want; without this, a scan can hang for hours.
+        retry_config=None,
     )
 
 
