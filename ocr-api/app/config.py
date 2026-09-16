@@ -20,13 +20,26 @@ class Settings(BaseSettings):
     output_dir: str = "/ocr-api/output"
 
     ocr_language: str = "deu+eng+frk"
-    ocr_engine: Literal["tesseract", "paddleocr", "gcv"] = "tesseract"
+    ocr_engine: Literal["tesseract", "paddleocr", "gcv", "openrouter"] = "tesseract"
     paddle_det_limit_type: Literal["max", "min"] = "max"
     paddle_det_limit_side_len: int = 1600
     # Lightweight mobile detector: much faster on CPU than the default
     # PP-OCRv5_server_det, small accuracy hit on clean docs. Recognition stays
     # on the accurate server default. Must be baked into the Docker warmup layer.
     paddle_text_det_model: str = "PP-OCRv5_mobile_det"
+
+    # OCR_ENGINE=openrouter: Tesseract builds the PDF text layer, a vision LLM
+    # transcribes each page. Cheap model first; handwritten/uncertain pages are
+    # re-run on the strong model (empty = no escalation). Uses openrouter_api_key.
+    ocr_llm_model: str = "google/gemini-3.1-flash-lite"
+    ocr_llm_strong_model: str = "google/gemini-3.5-flash"
+    ocr_llm_fallback_models: list[str] = []  # env: JSON list
+    ocr_llm_concurrency: int = 3
+    ocr_llm_timeout: int = 90
+    ocr_llm_max_tokens: int = 4000
+    ocr_llm_image_max_side: int = 2000
+    ocr_llm_escalate_unclear_max: int = 2
+
     trash_tmp_files: bool = True
 
     enable_ai_metadata: bool = False

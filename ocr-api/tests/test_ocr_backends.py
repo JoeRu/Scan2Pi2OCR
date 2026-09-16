@@ -341,3 +341,43 @@ def test_ocrpage_text_joins_lines_with_newline():
 
 def test_ocrpage_empty_text_is_empty_string():
     assert OcrPage([]).text == ""
+
+
+# ---------------------------------------------------------------------------
+# OcrPage transcript + LLM OCR settings
+# ---------------------------------------------------------------------------
+
+def test_ocr_page_text_prefers_transcript():
+    page = OcrPage([OcrLine("tesseract", 0, 0, 1, 1)], transcript="llm text")
+    assert page.text == "llm text"
+
+
+def test_ocr_page_text_falls_back_to_lines():
+    page = OcrPage([OcrLine("a", 0, 0, 1, 1), OcrLine("b", 0, 0, 1, 1)])
+    assert page.text == "a\nb"
+    assert page.transcript is None
+    assert page.transcript_model is None
+    assert page.escalated is False
+
+
+def test_config_accepts_openrouter_engine():
+    assert Settings(api_key="test", ocr_engine="openrouter").ocr_engine == "openrouter"
+
+
+def test_config_ocr_llm_defaults():
+    s = Settings(api_key="test")
+    assert s.ocr_llm_model == "google/gemini-3.1-flash-lite"
+    assert s.ocr_llm_strong_model == "google/gemini-3.5-flash"
+    assert s.ocr_llm_fallback_models == []
+    assert s.ocr_llm_concurrency == 3
+    assert s.ocr_llm_timeout == 90
+    assert s.ocr_llm_max_tokens == 4000
+    assert s.ocr_llm_image_max_side == 2000
+    assert s.ocr_llm_escalate_unclear_max == 2
+
+
+def test_config_fallback_models_from_env_json(monkeypatch):
+    monkeypatch.setenv("OCR_LLM_FALLBACK_MODELS", '["openai/gpt-5-mini", "anthropic/claude-haiku-4.5"]')
+    assert Settings(api_key="test").ocr_llm_fallback_models == [
+        "openai/gpt-5-mini", "anthropic/claude-haiku-4.5",
+    ]
